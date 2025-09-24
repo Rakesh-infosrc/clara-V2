@@ -1,0 +1,117 @@
+{
+  "sessions": {
+    "session_1758703136446": {
+      "session_id": "session_1758703136446",
+      "current_state": "user_classification",
+      "user_type": "unknown",
+      "start_time": 1758703136.4468818,
+      "last_activity": 1758703136.4468818,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1758703368347": {
+      "session_id": "session_1758703368347",
+      "current_state": "face_registration",
+      "user_type": "unknown",
+      "start_time": 1758703368.3477294,
+      "last_activity": 1758703368.3477294,
+      "verification_attempts": 0,
+      "user_data": {
+        "manual_name": "Rakesh",
+        "manual_employee_id": "E002",
+        "verification_method": "manual_with_otp"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1758704863229": {
+      "session_id": "session_1758704863229",
+      "current_state": "user_classification",
+      "user_type": "unknown",
+      "start_time": 1758704863.229907,
+      "last_activity": 1758704863.229907,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1758705365594": {
+      "session_id": "session_1758705365594",
+      "current_state": "user_classification",
+      "user_type": "unknown",
+      "start_time": 1758705365.5940812,
+      "last_activity": 1758705365.5940812,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1758705443434": {
+      "session_id": "session_1758705443434",
+      "current_state": "user_classification",
+      "user_type": "unknown",
+      "start_time": 1758705443.4342008,
+      "last_activity": 1758705443.4342008,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1758708167522": {
+      "session_id": "session_1758708167522",
+      "current_state": "user_classification",
+      "user_type": "unknown",
+      "start_time": 1758708167.52282,
+      "last_activity": 1758708167.52282,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1758708203721": {
+      "session_id": "session_1758708203721",
+      "current_state": "flow_end",
+      "user_type": "unknown",
+      "start_time": 1758708203.722748,
+      "last_activity": 1758708203.722748,
+      "verification_attempts": 0,
+      "user_data": {
+        "manual_name": "Rakesh",
+        "manual_employee_id": "E002",
+        "verification_method": "manual_with_otp"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1758709225025": {
+      "session_id": "session_1758709225025",
+      "current_state": "flow_end",
+      "user_type": "unknown",
+      "start_time": 1758709225.0258434,
+      "last_activity": 1758709225.0258434,
+      "verification_attempts": 0,
+      "user_data": {
+        "manual_name": "Rakesh",
+        "manual_employee_id": "E002",
+        "verification_method": "manual_with_otp"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1758709370009": {
+      "session_id": "session_1758709370009",
+      "current_state": "flow_end",
+      "user_type": "unknown",
+      "start_time": 1758709370.0090408,
+      "last_activity": 1758709370.0090408,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    }
+  },
+  "current_session_id": "session_1758709370009",
+  "last_updated": 1758709416.8430803
+}

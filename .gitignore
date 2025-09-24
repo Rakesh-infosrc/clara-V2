@@ -1,0 +1,63 @@
+# -----------------------------
+# Python
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+
+# -----------------------------
+# Virtual environments
+# -----------------------------
+.env
+.venv/
+env/
+venv/
+
+# -----------------------------
+# OS files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Project specific (Virtual Receptionist)
+# -----------------------------
+# CSV dummy-data (sensitive logs)
+*.csv
+!dummy-data/sample_structure.csv   # allow a template if you want
+
+# Visitor, Employee, Candidate data
+dummy-data/employee_details.csv
+dummy-data/candidate_interview.csv
+dummy-data/visitor_log.csv
+dummy-data/manager_visit.csv
+
+# Config / secrets
+config/
+secrets.json
+*.ini
+
+# Environment variables
+*.env
+.env.local
+
+# -----------------------------
+# Jupyter / Notebooks
+# -----------------------------
+.ipynb_checkpoints/
+*.ipynb
+
+# -----------------------------
+# IDE / Editor settings
+# -----------------------------
+.vscode/
+.idea/
+*.swp
+*.swo

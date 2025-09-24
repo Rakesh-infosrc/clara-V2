@@ -1,0 +1,56 @@
+{
+    "company_name": "Info Services",
+    "overview": "Info Services is a global digital transformation firm specializing in delivering innovative software solutions, cloud modernization, and data analytics services. With a team of over 500 professionals, the company is committed to helping businesses accelerate growth and achieve operational excellence through cutting-edge technology.",
+    "core_capabilities": [
+        "Cloud Native Solutions: Designing and implementing scalable cloud architectures tailored to business needs.",
+        "Cognitive AI: Developing intelligent systems that enhance decision-making and automate processes.",
+        "XOps: Integrating development, operations, and security to streamline workflows.",
+        "Salesforce Development: Customizing Salesforce platforms to optimize customer relationship management.",
+        "Generative AI: Creating AI-driven content and solutions to drive innovation.",
+        "Business Intelligence: Leveraging data analytics to provide actionable insights for strategic decisions."
+    ],
+    "global_presence": {
+        "United States": [
+            "Livonia, MI",
+            "Lawrenceville, GA",
+            "Cedar Park, TX"
+        ],
+        "India": [
+            "Hyderabad, Telangana",
+            "Chennai, Tamil Nadu"
+        ]
+    },
+    "industry_expertise": [
+        "Media & Entertainment",
+        "Supply Chain & Logistics",
+        "Manufacturing",
+        "Retail",
+        "Automotive",
+        "Banking & Financial Services"
+    ],
+    "notable_clients": [
+        "Financial Times",
+        "Reuters",
+        "Disney",
+        "Warner Bros. Discovery (WBD)",
+        "HBO",
+        "Ford Motor Company",
+        "Smartofai",
+        "iGuroo",
+        "KCF"
+    ],
+    "metrics": {
+        "founded": 2004,
+        "headquarters": "Livonia, Michigan, USA",
+        "employee_count": "Over 500",
+        "annual_revenue": "Estimated between $25 million and $100 million USD",
+        "ceo": "Madhava Kota",
+        "website": "www.infoservices.com"
+    },
+    "contact": {
+        "chennai_office": {
+            "address": "Alpha City IT Park Building Campus, No. 25, Old Mahabalipuram Road, Navallur, Chennai, Tamil Nadu - 600130",
+            "phone": "+91 9492718199"
+        }
+    }
+}

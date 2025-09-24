@@ -1,0 +1,4 @@
+Bot - python agent.py local (or) python agent.py dev
+Backend Server -  uvicorn server:app --reload --port 8000
+Frontend - npm run dev 
+Livekit server - .\livekit-server.exe --dev 
