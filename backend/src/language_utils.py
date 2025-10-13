@@ -1,0 +1,479 @@
+"""Utility helpers for multilingual support and code-mixed transcripts."""
+from __future__ import annotations
+
+import string
+from typing import Dict, Iterable, List
+
+DEFAULT_LANGUAGE = "en"
+SUPPORTED_LANGUAGES = {"en", "ta", "te", "hi"}
+
+LANGUAGE_CODE_ALIASES: Dict[str, str] = {
+    "en": "en",
+    "eng": "en",
+    "en-us": "en",
+    "en-in": "en",
+    "english": "en",
+    "tamil": "ta",
+    "telugu": "te",
+    "hindi": "hi",
+    "ta": "ta",
+    "tam": "ta",
+    "ta-in": "ta",
+    "te": "te",
+    "tel": "te",
+    "te-in": "te",
+    "hi": "hi",
+    "hin": "hi",
+    "hi-in": "hi",
+}
+
+MESSAGES = {
+    "wake_intro": {
+        "en": "Hello, my name is Clara, the receptionist at Info Services. How may I help you today?",
+        "ta": "வணக்கம், நான் கிளாரா, இன்போ சர்வீசஸ் அலுவலகத்தின் வரவேற்பாளர். இன்று நான் எப்படி உதவலாம்?",
+        "te": "నమస్తే, నేను క్లారా, ఇన్ఫో సర్వీసెస్ రిసెప్షనిస్ట్. ఈ రోజు మీకు ఎలా సహాయం చేయగలను?",
+        "hi": "नमस्ते, मैं क्लारा हूँ, इन्फो सर्विसेस की रिसेप्शनिस्ट। आज मैं आपकी कैसे मदद कर सकती हूँ?",
+    },
+    "wake_prompt": {
+        "en": "Hello! Are you an Employee or a Visitor?",
+        "ta": "வணக்கம்! நீங்கள் ஊழியரா அல்லது பார்வையாளரா?",
+        "te": "నమస్తే! మీరు ఉద్యోగినా లేక సందర్శకుడా?",
+        "hi": "नमस्ते! क्या आप कर्मचारी हैं या आगंतुक?",
+    },
+    "language_selection_prompt": {
+        "en": "I can speak English, Tamil, Telugu, and Hindi. Which one do you prefer?",
+        "ta": "நான் ஆங்கிலம், தமிழ், தெலுங்கு மற்றும் இந்தி மொழிகளில் பேச முடியும். நீங்கள் எந்த மொழியை விரும்புகிறீர்கள்?",
+        "te": "నేను ఆంగ్లం, తమిళం, తెలుగు మరియు హిందీలో మాట్లాడగలను. మీరు ఏ భాషను ఇష్టపడుతున్నారు?",
+        "hi": "मैं अंग्रेज़ी, तमिल, तेलुगु और हिंदी में बात कर सकती हूँ। आप किस भाषा को पसंद करते हैं?",
+    },
+    "language_selection_retry": {
+        "en": "Please say English, Tamil, Telugu, or Hindi so I can continue.",
+        "ta": "தயவுசெய்து ஆங்கிலம், தமிழ், தெலுங்கு அல்லது இந்தி என்று கூறுங்கள்.",
+        "te": "దయచేసి ఆంగ్లం, తమిళం, తెలుగు లేదా హిందీ అని చెప్పండి.",
+        "hi": "कृपया अंग्रेज़ी, तमिल, तेलुगु या हिंदी में से किसी एक का नाम बताइए।",
+    },
+    "language_selection_confirmed": {
+        "en": "Great! I'll speak in English. Are you an Employee or a Visitor?",
+        "ta": "சிறப்பு! நான் தமிழ் மொழியில் பேசுகிறேன். நீங்கள் ஊழியரா அல்லது பார்வையாளரா?",
+        "te": "అద్భుతం! నేను తెలుగులో మాట్లాడుతాను. మీరు ఉద్యోగినా లేక సందర్శకుడా?",
+        "hi": "बहुत बढ़िया! मैं हिंदी में बात करूँगी। क्या आप कर्मचारी हैं या आगंतुक?",
+    },
+    "classification_employee": {
+        "en": "Great! Please show your face to the camera for recognition.",
+        "ta": "சிறப்பாக இருக்கிறது! முகஅடையாளத்திற்காக கேமராவை நோக்கி பாருங்கள்.",
+        "te": "అద్భుతం! గుర్తింపుకోసం దయచేసి కెమెరా వైపు చూడండి.",
+        "hi": "बहुत बढ़िया! पहचान के लिए कृपया कैमरा की ओर देखें।",
+    },
+    "classification_visitor": {
+        "en": "Welcome! Please provide your name, phone number, purpose of visit, and who you're meeting.",
+        "ta": "வரவேற்கிறோம்! உங்கள் பெயர், தொலைபேசி எண், வருகையின் காரணம், மேலும் யாரை சந்திக்கிறீர்கள் என்பதை கூறுங்கள்.",
+        "te": "స్వాగతం! దయచేసి మీ పేరు, ఫోన్ నంబర్, సందర్శన కారణం మరియు మీరు ఎవరిని కలవబోతున్నారో చెప్పండి.",
+        "hi": "स्वागत है! कृपया अपना नाम, फ़ोन नंबर, आने का उद्देश्य और किससे मिलने आए हैं बताइए।",
+    },
+    "flow_face_recognition_prompt": {
+        "en": "I'm ready when you are — please look at the camera for a quick scan.",
+        "ta": "நான் தயார். தயவுசெய்து முகஅடையாளத்திற்காக கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "నేను సిద్ధంగా ఉన్నాను — వేగవంతమైన గుర్తింపుకోసం కెమెరా వైపు చూడండి.",
+        "hi": "मैं तैयार हूँ — कृपया त्वरित स्कैन के लिए कैमरे की ओर देखें।",
+    },
+    "flow_manual_verification_prompt": {
+        "en": "Please share your name and employee ID. If you received an OTP, tell me now.",
+        "ta": "தயவுசெய்து உங்கள் பெயர் மற்றும் ஊழியர் அடையாள எண்ணை கூறுங்கள். OTP கிடைத்திருந்தால் இப்போது சொல்லுங்கள்.",
+        "te": "దయచేసి మీ పేరు మరియు ఉద్యోగి ఐడీ చెప్పండి. మీరు OTP పొందితే ఇప్పుడే తెలియజేయండి.",
+        "hi": "कृपया अपना नाम और कर्मचारी आईडी बताइए। यदि आपको ओटीपी मिला है तो अभी बताइए।",
+    },
+    "flow_credential_check_prompt": {
+        "en": "Would you like me to register your face for faster access next time?",
+        "ta": "அடுத்த முறை வேகமான அணுகலுக்காக உங்கள் முகத்தை பதிவு செய்ய விரும்புகிறீர்களா?",
+        "te": "మరోసారి వేగవంతమైన ప్రవేశం కోసం మీ ముఖాన్ని నమోదు చేయాలనుకుంటున్నారా?",
+        "hi": "क्या आप अगली बार तेज़ प्रवेश के लिए अपना चेहरा पंजीकृत कराना चाहेंगे?",
+    },
+    "flow_face_registration_prompt": {
+        "en": "Hold still and look at the camera — capturing your face now.",
+        "ta": "அசையாமல் கேமராவை நோக்கிப் பாருங்கள் — உங்கள் முகத்தை இப்போது பதிவு செய்கிறேன்.",
+        "te": "అలాగే నిల్చొని కెమెరా వైపు చూడండి — మీ ముఖాన్ని ఇప్పుడు నమోదు చేస్తున్నాను.",
+        "hi": "स्थिर रहें और कैमरे की ओर देखें — मैं अभी आपका चेहरा कैप्चर कर रही हूँ।",
+    },
+    "flow_employee_verified_prompt": {
+        "en": "You are all set. How may I assist you today?",
+        "ta": "நீங்கள் தயார். இன்று எப்படி உதவலாம்?",
+        "te": "మీ అన్ని ఏర్పాట్లు పూర్తయ్యాయి. ఈ రోజు ఎలా సహాయం చేయగలను?",
+        "hi": "सब तैयार है। आज मैं आपकी कैसे मदद कर सकती हूँ?",
+    },
+    "flow_visitor_info_prompt": {
+        "en": "Please tell me your name, phone number, purpose of visit, and whom you are meeting.",
+        "ta": "தயவுசெய்து உங்கள் பெயர், தொலைபேசி எண், வருகையின் காரணம் மற்றும் யாரை சந்திக்கிறீர்கள் என்பதை கூறுங்கள்.",
+        "te": "దయచేసి మీ పేరు, ఫోన్ నంబర్, సందర్శన కారణం మరియు మీరు ఎవరిని కలవబోతున్నారో చెప్పండి.",
+        "hi": "कृपया अपना नाम, फ़ोन नंबर, आने का उद्देश्य और आप किससे मिलने आए हैं बताइए।",
+    },
+    "flow_visitor_face_capture_prompt": {
+        "en": "Please look at the camera so I can capture your photo for the visitor log.",
+        "ta": "நான் பார்வையாளர் பதிவுக்காக உங்கள் புகைப்படத்தை பிடிக்க கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "సందర్శకుల రికార్డ్ కోసం మీ ఫోటో తీసేందుకు కెమెరా వైపు చూడండి.",
+        "hi": "कृपया कैमरे की ओर देखें ताकि मैं आगंतुक रजिस्टर के लिए आपका फोटो ले सकूँ।",
+    },
+    "visitor_need_name": {
+        "en": "Please tell me your name so I can log your visit.",
+        "ta": "தயவுசெய்து உங்கள் வருகையை பதிவு செய்ய உங்கள் பெயரை கூறுங்கள்.",
+        "te": "దయచేసి మీ సందర్శనను నమోదు చేయడానికి మీ పేరు చెప్పండి.",
+        "hi": "कृपया आपका नाम बताइए ताकि मैं आपकी विज़िट दर्ज कर सकूँ।",
+    },
+    "visitor_need_phone": {
+        "en": "Please share your phone number so I can complete the log.",
+        "ta": "பதிவை முடிக்க உங்கள் தொலைபேசி எண்ணை பகிரவும்.",
+        "te": "పూర్తి నమోదు కోసం మీ ఫోన్ నంబర్‌ను పంచుకోండి.",
+        "hi": "कृपया आपका फ़ोन नंबर साझा कीजिए ताकि मैं रिकॉर्ड पूरा कर सकूँ।",
+    },
+    "visitor_need_purpose": {
+        "en": "Please let me know the purpose of your visit.",
+        "ta": "உங்கள் வருகையின் காரணத்தை தெரியப்படுத்துங்கள்.",
+        "te": "మీ సందర్శన ఉద్దేశ్యాన్ని చెప్పండి.",
+        "hi": "कृपया अपनी विज़िट का उद्देश्य बताइए।",
+    },
+    "visitor_need_host": {
+        "en": "Please tell me whom you are visiting so I can notify them.",
+        "ta": "நீங்கள் சந்திக்க விரும்பும் நபரின் பெயரை கூறுங்கள் ताकि நான் அவர்களுக்கு தெரிவிக்க முடியும்.",
+        "te": "మీరు ఎవరిని కలవబోతున్నారో తెలియజేయండి ताकि వారికి తెలియజేయగలను.",
+        "hi": "कृपया बताइए आप किससे मिलने आए हैं ताकि मैं उन्हें सूचित कर सकूँ।",
+    },
+    "visitor_photo_prompt": {
+        "en": "Thank you! I've logged your visit and notified {host}. Please look at the camera so we can capture your photo for our visitor log.",
+        "ta": "நன்றி! உங்கள் வருகையை பதிவு செய்து {host} அவர்களுக்கு தெரிவித்து விட்டேன். பார்வையாளர் பதிவிற்காக தயவுசெய்து கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "ధన్యవాదాలు! మీ వివరాలను నమోదు చేసి {host} గారికి తెలియజేశాను. సందర్శకుల రికార్డ్ కోసం కెమెరా వైపు చూడండి.",
+        "hi": "धन्यवाद! मैंने आपकी विज़िट दर्ज करके {host} को सूचित कर दिया है। कृपया कैमरे की ओर देखें ताकि हम आगंतुक रजिस्टर के लिए आपकी फोटो ले सकें।",
+    },
+    "flow_host_notification_prompt": {
+        "en": "I have informed your host. Please wait at the reception.",
+        "ta": "உங்கள் வரவேற்பாளருக்கு நான் தகவல் தெரிவித்துள்ளேன். தயவுசெய்து வரவேற்பில் காத்திருக்கவும்.",
+        "te": "మీ ఆతిథ్యుడికి నేను తెలియజేశాను. దయచేసి రిసెప్షన్ వద్ద వేచి ఉండండి.",
+        "hi": "मैंने आपके मेजबान को सूचित कर दिया है। कृपया रिसेप्शन पर प्रतीक्षा करें।",
+    },
+    "flow_end_prompt": {
+        "en": "Thank you. If you need anything else, just say 'Hey Clara'.",
+        "ta": "நன்றி. இன்னும் ஏதேனும் தேவையெனில் 'Hey Clara' என்று சொல்லுங்கள்.",
+        "te": "ధన్యవాదాలు. మళ్లీ ఏదైనా అవసరమైతే 'Hey Clara' అని చెప్పండి.",
+        "hi": "धन्यवाद। यदि आपको और कुछ चाहिए तो 'Hey Clara' कह दीजिए।",
+    },
+    "language_support_affirm": {
+        "en": "I can assist you in English, Tamil, Telugu, or Hindi. How may I help you?",
+        "ta": "நான் ஆங்கிலம், தமிழ், தெலுங்கு, இந்தி மொழிகளில் உதவ முடியும். எப்படி உதவலாம்?",
+        "te": "నేను ఆంగ్లం, తమిళం, తెలుగు లేదా హిందీ భాషల్లో సహాయం చేయగలను. ఎలా సహాయం చేయగలను?",
+        "hi": "मैं अंग्रेज़ी, तमिल, तेलुगु या हिंदी में आपकी मदद कर सकती हूँ। मैं आपकी कैसे सहायता करूँ?",
+    },
+    "manual_face_not_recognized": {
+        "en": "Face not recognized. Please share your registered company email or employee ID so I can verify you manually.",
+        "ta": "முகம் கண்டறியப்படவில்லை. கையேட்டு சரிபார்ப்புக்காக தயவுசெய்து உங்கள் பதிவு செய்யப்பட்ட நிறுவன மின்னஞ்சல் அல்லது ஊழியர் ஐடி அளிக்கவும்.",
+        "te": "ముఖం గుర్తించలేకపోయాను. చేతితో ధృవీకరించేందుకు దయచేసి మీ నమోదు చేసిన కంపెనీ ఇమెయిల్ లేదా ఉద్యోగి ఐడీ చెప్పారు.",
+        "hi": "चेहरा पहचाना नहीं जा सका। कृपया मैनुअल सत्यापन के लिए अपना पंजीकृत कंपनी ईमेल या कर्मचारी आईडी बताइए।",
+    },
+    "manual_no_session": {
+        "en": "No active session. Please say 'Hey Clara' to start.",
+        "ta": "செயலில் இருக்கும் அமர்வு இல்லை. தொடங்க 'Hey Clara' என்று சொல்லுங்கள்.",
+        "te": "సక్రియ సెషన్ లేదు. ప్రారంభించడానికి 'Hey Clara' అని చెప్పండి.",
+        "hi": "कोई सक्रिय सत्र नहीं है। प्रारंभ करने के लिए 'Hey Clara' कहिए।",
+    },
+    "manual_missing_employee_id": {
+        "en": "Please provide your employee ID so I can look up your registered email.",
+        "ta": "உங்கள் பதிவு செய்யப்பட்ட மின்னஞ்சலை பெற உங்கள் ஊழியர் ஐடியைத் தெரிவிக்கவும்.",
+        "te": "మీ నమోదు చేసిన ఇమెయిల్‌ను కనుగొనడానికి దయచేసి మీ ఉద్యోగి ఐడీని చెప్పండి.",
+        "hi": "कृपया अपना कर्मचारी आईडी बताइए ताकि मैं आपका पंजीकृत ईमेल ढूँढ सकूँ।",
+    },
+    "manual_prompt_company_email": {
+        "en": "I’ll verify your details and send an OTP to your registered email. Please tell me the OTP once you receive it.",
+        "ta": "நான் உங்கள் விவரங்களைச் சரிபார்த்து உங்கள் பதிவு செய்யப்பட்ட மின்னஞ்சலுக்கு OTP அனுப்புகிறேன். அதை பெறும் போதே எனக்குச் சொல்லுங்கள்.",
+        "te": "మీ వివరాలను ధృవీకరించి మీ నమోదిత ఇమెయిల్‌కు OTP పంపుతున్నాను. అది రాగానే నాకు చెప్పండి.",
+        "hi": "मैं आपकी जानकारी की पुष्टि करके आपके पंजीकृत ईमेल पर ओटीपी भेजूँगी। उसे मिलते ही मुझे बताइए।",
+    },
+    "manual_preparation_error": {
+        "en": "I couldn’t prepare verification because of an internal error ({error}). Please try again.",
+        "ta": "உள் பிழை ({error}) காரணமாக சரிபார்ப்பை தயார் செய்ய முடியவில்லை. தயவுசெய்து மறுபடியும் முயற்சிக்கவும்.",
+        "te": "అంతర్గత లోపం ({error}) కారణంగా ధృవీకరణను సిద్ధం చేయలేకపోయాను. దయచేసి మళ్లీ ప్రయత్నించండి.",
+        "hi": "आंतरिक त्रुटि ({error}) की वजह से सत्यापन तैयार नहीं कर पाई। कृपया दोबारा प्रयास करें।",
+    },
+    "manual_internal_error_retry": {
+        "en": "I ran into an internal error during verification. Could you please share the OTP again?",
+        "ta": "சரிபார்ப்பின் போது உள் பிழை ஏற்பட்டது. தயவுசெய்து OTP-ஐ மீண்டும் தெரிவிக்க முடியுமா?",
+        "te": "ధృవీకరణ సమయంలో అంతర్గత లోపం వచ్చింది. దయచేసి OTP ను మరోసారి చెప్పగలరా?",
+        "hi": "सत्यापन के दौरान आंतरिक त्रुटि हुई। कृपया ओटीपी फिर से बताएँ।",
+    },
+    "manual_credentials_verified": {
+        "en": "Credentials verified! Would you like to register your face for faster access next time? (Yes or No)",
+        "ta": "சரிபார்ப்பு வெற்றிகரமாக முடிந்தது! அடுத்த முறை விரைவாக அணுக முகம் பதிவு செய்ய விரும்புகிறீர்களா? (ஆம்/இல்லை)",
+        "te": "ధృవీకరణ విజయవంతమైంది! తరువాతిసారి వేగంగా ప్రవేశించేందుకు మీ ముఖాన్ని నమోదు చేయాలనుకుంటున్నారా? (అవును/కాదు)",
+        "hi": "सत्यापन सफल हो गया! अगली बार तेज़ प्रवेश के लिए क्या आप अपना चेहरा पंजीकृत कराना चाहेंगे? (हाँ/नहीं)",
+    },
+    "manual_otp_failed": {
+        "en": "OTP verification failed. Please request a new OTP or try again.",
+        "ta": "OTP சரிபார்ப்பு தோல்வியடைந்தது. புதிய OTP-ஐ கோருங்கள் அல்லது மீண்டும் முயற்சிக்கவும்.",
+        "te": "OTP ధృవీకరణ విఫలమైంది. కొత్త OTPను అభ్యర్థించండి లేదా మళ్లీ ప్రయత్నించండి.",
+        "hi": "ओटीपी सत्यापन विफल हुआ। कृपया नया ओटीपी माँगें या दोबारा प्रयास करें।",
+    },
+    "manual_otp_sent": {
+        "en": "I’ve sent an OTP to your registered email. Please share it to complete verification.",
+        "ta": "உங்கள் பதிவு செய்யப்பட்ட மின்னஞ்சலுக்கு OTP அனுப்பியுள்ளேன். சரிபார்ப்பை நிறைவு செய்ய அதை பகிரவும்.",
+        "te": "మీ నమోదు చేసిన ఇమెయిల్‌కు OTP పంపాను. ధృవీకరణ పూర్తి చేయడానికి దయచేసి చెప్పండి.",
+        "hi": "मैंने आपके पंजीकृत ईमेल पर ओटीपी भेजा है। सत्यापन पूरा करने के लिए कृपया उसे बताइए।",
+    },
+    "manual_otp_send_failed": {
+        "en": "I couldn't send the OTP right now ({error}). Please try again shortly.",
+        "ta": "இப்போது OTP அனுப்ப முடியவில்லை ({error}). சிறிது நேரத்தில் மீண்டும் முயற்சிக்கவும்.",
+        "te": "ప్రస్తుతం OTP పంపలేకపోయాను ({error}). కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
+        "hi": "मैं फिलहाल ओटीपी भेज नहीं पाई ({error})। कृपया थोड़ी देर में फिर कोशिश करें।",
+    },
+    "manual_invalid_session": {
+        "en": "Invalid session or user type.",
+        "ta": "அமர்வு அல்லது பயனர் வகை தவறானது.",
+        "te": "సెషన్ లేదా వినియోగదారుల రకం చెల్లదు.",
+        "hi": "सत्र या उपयोगकर्ता प्रकार मान्य नहीं है।",
+    },
+    "manual_not_verified": {
+        "en": "Invalid session or not verified yet.",
+        "ta": "அமர்வு தவறானது அல்லது இன்னும் சரிபார்க்கப்படவில்லை.",
+        "te": "సెషన్ చెల్లదు లేదా ఇంకా ధృవీకరించలేదు.",
+        "hi": "सत्र मान्य नहीं है या अभी सत्यापन नहीं हुआ है।",
+    },
+    "face_recognition_success": {
+        "en": "I’m glad to see you, {name}. How can I help you today?",
+        "ta": "உங்களை மீண்டும் சந்தித்ததில் மகிழ்ச்சி, {name}. இன்று எப்படி உதவலாம்?",
+        "te": "మిమ్మల్ని చూసి ఆనందంగా ఉంది {name}. ఈ రోజు ఎలా సహాయం చేయగలను?",
+        "hi": "आपसे मिलकर खुशी हुई, {name}। आज मैं आपकी कैसे मदद कर सकती हूँ?",
+    },
+    "face_registration_ready": {
+        "en": "Please look at the camera to register your face for future quick access.",
+        "ta": "அடுத்த முறை விரைவாக அணுக உங்கள் முகத்தை பதிவு செய்ய கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "తరువాతి సారి వేగంగా ప్రవేశించేందుకు మీ ముఖాన్ని నమోదు చేయడానికి కెమెరా వైపు చూడండి.",
+        "hi": "अगली बार तेज़ प्रवेश के लिए अपना चेहरा दर्ज कराने हेतु कैमरे की ओर देखें।",
+    },
+    "face_registration_skip_ack": {
+        "en": "Perfect! You now have full access to all tools. How can I assist you today?",
+        "ta": "சிறப்பானது! அனைத்து கருவிகளுக்கும் இப்போது முழு அணுகல் உங்களுக்குள்ளது. இன்று எப்படி உதவலாம்?",
+        "te": "అద్భుతం! అన్ని సాధనాలకు ఇప్పుడు మీకు పూర్తి ప్రవేశం ఉంది. ఈ రోజు ఎలా సహాయపడగలను?",
+        "hi": "बहुत बढ़िया! अब आपको सभी उपकरणों का पूरा उपयोग मिल गया है। आज मैं आपकी कैसे मदद कर सकती हूँ?",
+    },
+    "face_registration_success": {
+        "en": "Face registered in system! You now have full access to all tools. How can I assist you today?",
+        "ta": "முகம் வெற்றிகரமாக பதிவுசெய்யப்பட்டது! அனைத்து கருவிகளிலும் உங்களுக்கு முழு அணுகல் உள்ளது. எப்படி உதவலாம்?",
+        "te": "ముఖం విజయవంతంగా నమోదు అయింది! అన్ని సాధనాలకు ఇప్పుడు మీకు పూర్తి ప్రవేశం ఉంది. ఎలా సహాయపడగలను?",
+        "hi": "चेहरा सफलतापूर्वक दर्ज हो गया! अब आपको सभी उपकरणों का पूरा उपयोग मिल गया है। मैं कैसे मदद करूँ?",
+    },
+    "search_prompt": {
+        "en": "What would you like me to search for?",
+        "ta": "எதைத் தேட வேண்டும் என்று விரும்புகிறீர்கள்?",
+        "te": "నేను ఏది వెతకాలని మీరు కోరుకుంటున్నారు?",
+        "hi": "आप चाहते हैं कि मैं क्या खोजूँ?",
+    },
+    "weather_report": {
+        "en": "{city}: {report}",
+        "ta": "{city}: {report}",
+        "te": "{city}: {report}",
+        "hi": "{city}: {report}",
+    },
+    "weather_error": {
+        "en": "❌ Unable to retrieve the weather right now.",
+        "ta": "❌ தற்போது வானிலை தகவலை பெற முடியவில்லை.",
+        "te": "❌ ప్రస్తుతం వాతావరణ సమాచారాన్ని తెచ్చుకోలేకపోతున్నాను.",
+        "hi": "❌ इस समय मौसम जानकारी प्राप्त नहीं कर पा रही हूँ।",
+    },
+    "start_face_capture": {
+        "en": "Please show your face to the camera for recognition.",
+        "ta": "முகஅடையாளத்திற்காக தயவுசெய்து கேமராவை நோக்கி பாருங்கள்.",
+        "te": "గుర్తింపుకోసం దయచేసి కెమెరా వైపు చూడండి.",
+        "hi": "पहचान के लिए कृपया कैमरा की ओर देखें।",
+    },
+    "start_visitor_info": {
+        "en": "Please enter your name, phone number, purpose, and who you're meeting.",
+        "ta": "தயவுசெய்து உங்கள் பெயர், தொலைபேசி எண், வருகை காரணம் மற்றும் யாரை சந்திக்கிறீர்கள் என்பதை உள்ளிடுங்கள்.",
+        "te": "దయచేసి మీ పేరు, ఫోన్ నంబర్, సందర్శన కారణం మరియు మీరు ఎవరిని కలవబోతున్నారో నమోదు చేయండి.",
+        "hi": "कृपया अपना नाम, फ़ोन नंबर, आने का उद्देश्य और किससे मिलने आए हैं दर्ज करें।",
+    },
+    "wake_ack": {
+        "en": "I'm awake! How can I help?",
+        "ta": "நான் விழித்துள்ளேன்! எப்படி உதவலாம்?",
+        "te": "నేను మేలుకున్నాను! ఎలా సహాయం చేయగలను?",
+        "hi": "मैं जाग गई हूँ! मैं कैसे मदद कर सकती हूँ?",
+    },
+    "sleep_ack": {
+        "en": "Going idle, say 'Hey Clara' to wake me again.",
+        "ta": "நான் ஓய்வெடுக்கிறேன், மீண்டும் எழுப்ப 'Hey Clara' என்று சொல்லுங்கள்.",
+        "te": "నేను విశ్రాంతి తీసుకుంటాను, మళ్లీ లేపడానికి 'Hey Clara' అని చెప్పండి.",
+        "hi": "मैं विराम ले रही हूँ, मुझे जगाने के लिए 'Hey Clara' कहें।",
+    },
+    "sleeping_ignore": {
+        "en": "Clara is sleeping. Ignoring input.",
+        "ta": "க்ளாரா தூங்கிக்கொண்டிருக்கிறார். உள்ளீட்டை புறக்கணிக்கிறேன்.",
+        "te": "క్లారా నిద్రలో ఉంది. ఇన్‌పుట్‌ను పట్టించుకోవడం లేదు.",
+        "hi": "क्लारा सो रही है। इनपुट को अनदेखा किया जा रहा है।",
+    },
+    "already_awake": {
+        "en": "Clara is already active.",
+        "ta": "க்ளாரா ஏற்கனவே செயல்பாட்டில் உள்ளார்.",
+        "te": "క్లారా ఇప్పటికే చురుకుగా ఉంది.",
+        "hi": "क्लारा पहले से सक्रिय है।",
+    },
+    "classification_retry": {
+        "en": "I didn't catch that. Are you an Employee or a Visitor?",
+        "ta": "எனக்கு புரியவில்லை. நீங்கள் ஊழியரா அல்லது பார்வையாளரா?",
+        "te": "నాకు అర్థం కాలేదు. మీరు ఉద్యోగినా లేక సందర్శకుడా?",
+        "hi": "मुझे समझ नहीं आया। क्या आप कर्मचारी हैं या आगंतुक?",
+    },
+    "auto_sleep_notice": {
+        "en": "Clara has gone idle due to inactivity. Say 'Hey Clara' to wake me up.",
+        "ta": "செயல்பாட்டின்மை காரணமாக க்ளாரா ஓய்வில் உள்ளார். என்னை எழுப்ப 'Hey Clara' என்று சொல்லுங்கள்.",
+        "te": "కార్యకలాపం లేకపోవడం వల్ల క్లారా విశ్రాంతికి వెళ్లింది. నన్ను లేపడానికి 'Hey Clara' అని చెప్పండి.",
+        "hi": "गतिविधि न होने के कारण क्लारा विराम पर है। मुझे जगाने के लिए 'Hey Clara' कहें।",
+    },
+    "no_speech": {
+        "en": "No recognizable speech detected.",
+        "ta": "அறியக்கூடிய பேச்சு எதுவும் கண்டுபிடிக்கப்படவில்லை.",
+        "te": "గుర్తించగల మాట ఏదీ కనబడలేదు.",
+        "hi": "कोई पहचानी जाने वाली आवाज़ नहीं मिली।",
+    },
+    "active_heard": {
+        "en": "Clara (active) heard: {text}",
+        "ta": "க்ளாரா (செயலில்) கேட்டது: {text}",
+        "te": "క్లారా (సక్రియంగా) విన్నది: {text}",
+        "hi": "क्लारा (सक्रिय) ने सुना: {text}",
+    },
+}
+
+NORMALIZATION_MAP = {
+    "ta": {
+        "na": "நன",
+        "kudu": "கட",
+        "employee": "ஊழயர",
+        "visitor": "வரநதனர",
+        "ரிசர்ச்": "சர்ச்",
+        "ரிப்செஸ்": "சர்ச்",
+        "சர்ச்": "தேடல்",
+        "ரிப்சேச்": "சர்ச்",
+    },
+    "te": {
+        "na": "నన",
+        "kudu": "ఇవవ",
+        "employee": "ఉదయగ",
+        "visitor": "సదరశకడ",
+        "talk in telugu": "తెలుగులో",
+        "speak telugu": "తెలుగులో",
+        "telugu": "తెలుగు",
+    },
+    "hi": {
+        "na": "म",
+        "employee": "करमचर",
+        "talk in hindi": "हिंदी",
+        "speak hindi": "हिंदी",
+        "hindi": "हिंदी",
+    },
+    "en": {
+        "talk in tamil": "talk in tamil",
+        "talk in telugu": "talk in telugu",
+        "talk in hindi": "talk in hindi",
+    },
+}
+
+WAKE_PHRASES = {
+    "en": ["hey clara"],
+    "ta": ["ஹே க்ளாரா", "ஹாய் க்ளாரா", "hey clara"],
+    "te": ["హే క్లారా", "హాయ్ క్లారా", "hey clara"],
+    "hi": ["हे क्लारा", "hey clara"],
+}
+
+
+SLEEP_PHRASES = {
+    "en": ["go idle", "sleep now", "take a break"],
+    "ta": ["ஓய்வு எடு", "தூங்கிக்கொள்", "ஓய்வெணு", "go idle"],
+    "te": ["విశ్రాంతి తీసుకో", "నిద్రపో", "అలసిపోయి విశ్రాంతి తీసుకో", "go idle"],
+    "hi": ["सो जाओ", "आराम करो", "विराम लो", "go idle"],
+}
+
+
+def detect_language_from_text(text: str | None) -> str | None:
+    if not text:
+        return None
+
+    for ch in text:
+        code_point = ord(ch)
+        if 0x0B80 <= code_point <= 0x0BFF:
+            return "ta"
+        if 0x0C00 <= code_point <= 0x0C7F:
+            return "te"
+        if 0x0900 <= code_point <= 0x097F:
+            return "hi"
+
+    normalized = text.lower().strip()
+    if not normalized:
+        return None
+
+    primary = normalized.split("-")[0]
+    if primary in LANGUAGE_CODE_ALIASES:
+        return LANGUAGE_CODE_ALIASES[primary]
+
+    translator = str.maketrans({char: " " for char in string.punctuation})
+    tokenized = normalized.translate(translator).split()
+    for token in tokenized:
+        if token in LANGUAGE_CODE_ALIASES:
+            return LANGUAGE_CODE_ALIASES[token]
+
+    for keyword, code in (
+        ("english", "en"),
+        ("tamil", "ta"),
+        ("telugu", "te"),
+        ("hindi", "hi"),
+    ):
+        if keyword in normalized:
+            return code
+
+    return None
+
+
+def resolve_language_code(label: str | None) -> str:
+    detected = detect_language_from_text(label)
+    if detected:
+        return detected
+    return DEFAULT_LANGUAGE
+
+
+def get_message(key: str, lang: str, **kwargs) -> str:
+    lang = lang if lang in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+    bucket = MESSAGES.get(key, {})
+    template = bucket.get(lang, bucket.get(DEFAULT_LANGUAGE, ""))
+    return template.format(**kwargs)
+
+
+def normalize_transcript(text: str, lang: str) -> str:
+    lang = lang if lang in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+    text = text.lower()
+    replacements = NORMALIZATION_MAP.get(lang, {})
+    normalized = text
+    for source, target in replacements.items():
+        normalized = normalized.replace(source, target)
+    return normalized
+
+
+def get_wake_phrases(lang: str) -> List[str]:
+    lang = lang if lang in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+    return WAKE_PHRASES.get(lang, WAKE_PHRASES[DEFAULT_LANGUAGE])
+
+
+def get_sleep_phrases(lang: str) -> List[str]:
+    lang = lang if lang in SUPPORTED_LANGUAGES else DEFAULT_LANGUAGE
+    return SLEEP_PHRASES.get(lang, SLEEP_PHRASES[DEFAULT_LANGUAGE])
+
+
+def any_phrase_in_text(text: str, phrases: Iterable[str]) -> bool:
+    text = text.lower()
+    for phrase in phrases:
+        if phrase and phrase.lower() in text:
+            return True
+    return False
+
+
+__all__ = [
+    "DEFAULT_LANGUAGE",
+    "SUPPORTED_LANGUAGES",
+    "resolve_language_code",
+    "get_message",
+    "normalize_transcript",
+    "get_wake_phrases",
+    "get_sleep_phrases",
+    "any_phrase_in_text",
+]

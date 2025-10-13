@@ -31,8 +31,6 @@ export async function POST(req: Request) {
 
     // Parse agent configuration from request body
     const body = await req.json();
-    const agentName: string = body?.room_config?.agents?.[0]?.agent_name;
-
     // Generate participant token with FIXED room name for agent matching
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
@@ -40,8 +38,7 @@ export async function POST(req: Request) {
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
-      roomName,
-      agentName
+      roomName
     );
 
     // Return connection details
@@ -65,8 +62,7 @@ export async function POST(req: Request) {
 
 function createParticipantToken(
   userInfo: AccessTokenOptions,
-  roomName: string,
-  agentName?: string
+  roomName: string
 ): Promise<string> {
   const at = new AccessToken(API_KEY, API_SECRET, {
     ...userInfo,
@@ -80,12 +76,6 @@ function createParticipantToken(
     canSubscribe: true,
   };
   at.addGrant(grant);
-
-  if (agentName) {
-    at.roomConfig = new RoomConfiguration({
-      agents: [{ agentName }],
-    });
-  }
 
   return at.toJwt();
 }

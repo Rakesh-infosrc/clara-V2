@@ -3,17 +3,15 @@
 Virtual Receptionist - Main Entry Point
 Clara AI Assistant with wake/sleep functionality
 """
-
 import sys
 import os
 from pathlib import Path
-
 # Add src directory to Python path
 src_dir = Path(__file__).parent / "src"
 sys.path.insert(0, str(src_dir))
 
 # Import the agent module
-from agent import cli, WorkerOptions, entrypoint
+from src.agent import cli, WorkerOptions, entrypoint
 
 def main():
     """Main function to run Clara Virtual Receptionist"""

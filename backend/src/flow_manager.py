@@ -15,11 +15,21 @@ from enum import Enum
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
+from language_utils import (
+    get_message,
+    resolve_language_code,
+    SUPPORTED_LANGUAGES,
+    normalize_transcript,
+)
+from tools.config import is_face_recognition_enabled
+from agent_state import get_preferred_language, set_preferred_language
+
 
 class FlowState(Enum):
     """Flow states matching the flowchart"""
     IDLE = "idle"
     WAKE_DETECTED = "wake_detected"
+    LANGUAGE_SELECTION = "language_selection"
     USER_CLASSIFICATION = "user_classification"
     FACE_RECOGNITION = "face_recognition"
     FACE_MATCH_CHECK = "face_match_check"
@@ -89,62 +99,163 @@ class VirtualReceptionistFlow:
         if self.current_session_id and self.current_session_id in self.sessions:
             return self.sessions[self.current_session_id]
         return None
-    
     def process_wake_word_detected(self) -> Tuple[bool, str]:
         """Process wake word detection - start of flow"""
         # Create new session or reset existing one
         session_id = self.create_session()
         session = self.get_current_session()
-        session.current_state = FlowState.USER_CLASSIFICATION
-        
+
+        if session:
+            session.current_state = FlowState.LANGUAGE_SELECTION
+            session.last_activity = time.time()
+
         self.save_sessions()
-        return True, "Hello, my name is clara, the receptionist at an Info Services, How may I help you today?"
-        
+        # Return localized greeting. The caller (agent/frontend) will append the wake prompt.
+        lang = get_preferred_language()
+        greeting = get_message("wake_intro", lang)
+        language_prompt = get_message("language_selection_prompt", lang)
+        combined = f"{greeting} {language_prompt}"
+        print(f"[Flow] Wake message ({lang}): {combined}")
+        return True, combined
     
     def process_user_classification(self, user_input: str) -> Tuple[bool, str, FlowState]:
         """Process user type classification"""
         session = self.get_current_session()
         if not session:
-            return False, "No active session. Please say 'Hey Clara' to start.", FlowState.IDLE
-        
-        user_input_lower = user_input.lower().strip()
-        
-        if any(word in user_input_lower for word in ['employee', 'staff', 'worker', 'work here']):
+            lang = get_preferred_language()
+            return False, get_message("manual_no_session", lang), FlowState.IDLE
+
+        lang = get_preferred_language()
+        user_input_clean = user_input.strip()
+        user_input_normalized = normalize_transcript(user_input_clean, lang)
+        user_input_lower = user_input_normalized.lower()
+
+        if session.current_state == FlowState.LANGUAGE_SELECTION:
+            lang_choice = resolve_language_code(user_input_lower)
+            if lang_choice not in SUPPORTED_LANGUAGES:
+                response = get_message("language_selection_retry", lang)
+                print(f"[Flow] Language selection retry ({lang}): '{response}'")
+                return False, response, FlowState.LANGUAGE_SELECTION
+
+            set_preferred_language(lang_choice)
+            session.current_state = FlowState.USER_CLASSIFICATION
+            session.last_activity = time.time()
+            self.save_sessions()
+
+            response = get_message("language_selection_confirmed", lang_choice)
+            print(f"[Flow] Language selected ({lang_choice}): '{response}'")
+            return True, response, FlowState.USER_CLASSIFICATION
+
+        employee_keywords = [
+            'employee', 'staff', 'worker', 'work here',
+            'ஊழியர்', 'ஊழியன', 'ஊழியர்கள்',
+            'ఉద్యోగి', 'సిబ్బంది',
+            'कर्मचारी', 'स्टाफ'
+        ]
+        if any(word in user_input_lower for word in employee_keywords):
             session.user_type = UserType.EMPLOYEE
             session.current_state = FlowState.FACE_RECOGNITION
             session.last_activity = time.time()
-            
-            # Signal frontend to start face capture - ONLY NOW after employee classification
-            from flow_signal import post_signal
-            post_signal("start_face_capture", {
-                "message": "Employee verified - starting face recognition",
-                "next_endpoint": "/flow/face_recognition"
-            })
-            
+            response = get_message("classification_employee", lang)
+            # Signal frontend to start face capture after employee classification
+            try:
+                from flow_signal import post_signal
+                post_signal("start_face_capture", {
+                    "message": response,
+                    "next_endpoint": "/flow/face_recognition"
+                })
+            except Exception as e:
+                print(f"Warning: could not post start_face_capture signal: {e}")
             self.save_sessions()
-            return True, "Great! Please show your face to the camera for recognition.", FlowState.FACE_RECOGNITION
-            
-        elif any(word in user_input_lower for word in ['visitor', 'guest', 'visiting', 'meeting']):
+            print(f"[Flow] Classified as EMPLOYEE ({lang}): '{response}'")
+            return True, response, FlowState.FACE_RECOGNITION
+
+        visitor_keywords = [
+            'visitor', 'guest', 'visiting', 'meeting',
+            'வருகையாளர்', 'விருந்தினர்', 'வருகை',
+            'సందర్శకుడు', 'అతిథి',
+            'आगंतुक', 'मेहमान'
+        ]
+        if any(word in user_input_lower for word in visitor_keywords):
             session.user_type = UserType.VISITOR
             session.current_state = FlowState.VISITOR_INFO_COLLECTION
             session.last_activity = time.time()
+            response = get_message("classification_visitor", lang)
+            # Ask frontend to collect visitor info first
+            try:
+                from flow_signal import post_signal
+                post_signal("start_visitor_info", {
+                    "message": response,
+                    "next_endpoint": "/flow/visitor_info"
+                })
+            except Exception as e:
+                print(f"Warning: could not post start_visitor_info signal on classification: {e}")
             self.save_sessions()
-            return True, "Welcome! Please provide your name, phone number, purpose of visit, and who you're meeting.", FlowState.VISITOR_INFO_COLLECTION
-        
+            print(f"[Flow] Classified as VISITOR ({lang}): '{response}'")
+            return True, response, FlowState.VISITOR_INFO_COLLECTION
+
         # If unclear, ask for clarification
-        return False, "I didn't catch that. Are you an Employee or a Visitor?", FlowState.USER_CLASSIFICATION
+        response = get_message("classification_retry", lang)
+        print(f"[Flow] Unclear classification ({lang}): '{response}'")
+        return False, response, FlowState.USER_CLASSIFICATION
     
     def process_face_recognition_result(self, face_result: Dict[str, Any]) -> Tuple[bool, str, FlowState]:
         """Process face recognition results for employees"""
         session = self.get_current_session()
-        if not session or session.user_type != UserType.EMPLOYEE:
-            return False, "Invalid session or user type", FlowState.IDLE
-        
+
+        # Recover from stale session issues (e.g. session ended just before recognition finished)
+        if not session:
+            self.create_session()
+            session = self.get_current_session()
+
+        if session and session.user_type != UserType.EMPLOYEE:
+            # A valid face recognition success should promote the user to EMPLOYEE
+            if face_result.get("status") == "success":
+                session.user_type = UserType.EMPLOYEE
+                session.current_state = FlowState.FACE_MATCH_CHECK
+            else:
+                # Gracefully fall back to manual verification instead of a hard error
+                session.user_type = UserType.EMPLOYEE
+                session.current_state = FlowState.MANUAL_VERIFICATION
+                self.save_sessions()
+                lang = get_preferred_language()
+                return False, get_message("manual_face_not_recognized", lang), FlowState.MANUAL_VERIFICATION
+
+        if not session:
+            lang = get_preferred_language()
+            return False, get_message("manual_invalid_session", lang), FlowState.IDLE
+
         if face_result.get("status") == "success":
+            if not is_face_recognition_enabled():
+                session.current_state = FlowState.MANUAL_VERIFICATION
+                session.verification_attempts += 1
+                self.save_sessions()
+                lang = get_preferred_language()
+                return (
+                    False,
+                    get_message("manual_face_not_recognized", lang),
+                    FlowState.MANUAL_VERIFICATION,
+                )
             # Face match found
-            emp_name = face_result.get("name")
-            emp_id = face_result.get("employeeId")
-            
+            emp_name = (
+                face_result.get("name")
+                or face_result.get("employee_name")
+                or session.user_data.get("employee_name")
+            )
+            emp_id = (
+                face_result.get("employeeId")
+                or face_result.get("employee_id")
+                or session.user_data.get("employee_id")
+            )
+
+            if not emp_name or not emp_id:
+                # Missing identity details – fall back to manual verification flow
+                session.current_state = FlowState.MANUAL_VERIFICATION
+                session.verification_attempts += 1
+                self.save_sessions()
+                lang = get_preferred_language()
+                return False, get_message("manual_face_not_recognized", lang), FlowState.MANUAL_VERIFICATION
+
             session.user_data.update({
                 "employee_name": emp_name,
                 "employee_id": emp_id,
@@ -152,56 +263,142 @@ class VirtualReceptionistFlow:
             })
             session.is_verified = True
             session.current_state = FlowState.EMPLOYEE_VERIFIED
-            
+
             # Update global verification state
             from agent_state import set_user_verified
             set_user_verified(emp_name, emp_id)
-            
+
             self.save_sessions()
-            return True, f"Face registered in system! Welcome {emp_name}. You now have full access to all tools.", FlowState.EMPLOYEE_VERIFIED
-        
+            lang = get_preferred_language()
+            return True, get_message("face_recognition_success", lang, name=emp_name), FlowState.EMPLOYEE_VERIFIED
         else:
             # Face not matched - proceed to manual verification
             session.current_state = FlowState.MANUAL_VERIFICATION
             session.verification_attempts += 1
             self.save_sessions()
-            return False, "Face not recognized. Please provide your name and employee ID for manual verification.", FlowState.MANUAL_VERIFICATION
+            lang = get_preferred_language()
+            return False, get_message("manual_face_not_recognized", lang), FlowState.MANUAL_VERIFICATION
     
-    def process_manual_verification_step(self, name: str = None, employee_id: str = None, otp: str = None) -> Tuple[bool, str, FlowState]:
+    def process_manual_verification_step(
+        self,
+        email: str = None,
+        otp: str = None,
+        name: str = None,
+        employee_id: str = None,
+    ) -> Tuple[bool, str, FlowState]:
         """Process manual employee verification steps"""
         session = self.get_current_session()
         if not session:
-            return False, "No active session", FlowState.IDLE
-        
-        if not name or not employee_id:
-            return False, "Please provide both your name and employee ID.", FlowState.MANUAL_VERIFICATION
-        
-        # Store the credentials for potential face registration
-        session.user_data.update({
-            "manual_name": name,
-            "manual_employee_id": employee_id
-        })
-        
+            lang = get_preferred_language()
+            return False, get_message("manual_no_session", lang), FlowState.IDLE
+
+        resolved_email = email
+
+        if not employee_id:
+            lang = get_preferred_language()
+            return False, get_message("manual_missing_employee_id", lang), FlowState.MANUAL_VERIFICATION
+
+        if not resolved_email and employee_id:
+            try:
+                from tools.employee_repository import get_employee_by_id
+
+                record_by_id = get_employee_by_id(employee_id)
+                if record_by_id:
+                    resolved_email = record_by_id.get("email")
+                    if resolved_email:
+                        session.user_data.setdefault("manual_employee_id", record_by_id.get("employee_id"))
+                        session.user_data.setdefault("manual_name", record_by_id.get("name"))
+            except Exception as lookup_error:
+                print(f"[Flow] Employee lookup by ID failed: {lookup_error}")
+
+        if resolved_email:
+            session.user_data["manual_email"] = resolved_email
+        if name:
+            session.user_data["manual_name"] = name
+        if employee_id:
+            session.user_data["manual_employee_id"] = employee_id
+
+        try:
+            from tools.employee_verification import get_employee_details  # async function
+            import asyncio
+        except Exception as e:
+            lang = get_preferred_language()
+            return False, get_message("manual_preparation_error", lang, error=e), FlowState.MANUAL_VERIFICATION
+
         if otp:
-            # OTP verification step
-            session.user_data["verification_method"] = "manual_with_otp"
-            session.is_verified = True
-            session.current_state = FlowState.CREDENTIAL_CHECK
-            
-            from agent_state import set_user_verified
-            set_user_verified(name, employee_id)
-            
-            self.save_sessions()
-            return True, f"Credentials verified! Welcome {name}. Would you like to register your face for faster access next time? (Yes/No)", FlowState.CREDENTIAL_CHECK
-        else:
-            # Initial verification - need OTP
-            return False, "OTP has been sent to your registered email. Please provide the OTP to complete verification.", FlowState.MANUAL_VERIFICATION
+            try:
+                from tools.employee_verification import verify_otp_sync
+                msg = verify_otp_sync(resolved_email, otp, employee_id)
+            except ImportError:
+                try:
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                    msg = asyncio.run(get_employee_details(None, resolved_email, name, employee_id, otp))
+                except Exception as async_error:
+                    print(f"[Flow] Async OTP verification error: {async_error}")
+                    lang = get_preferred_language()
+                    return False, get_message("manual_internal_error_retry", lang), FlowState.MANUAL_VERIFICATION
+            except Exception as e:
+                print(f"[Flow] OTP verification error: {e}")
+                return False, "I encountered an internal error during the verification process. Could you please provide the OTP again?", FlowState.MANUAL_VERIFICATION
+
+            success = ("✅" in msg) and ("OTP verified" in msg or "Welcome" in msg)
+            if success:
+                session.user_data["verification_method"] = "manual_with_otp"
+                session.is_verified = True
+                session.current_state = FlowState.CREDENTIAL_CHECK
+                from agent_state import set_user_verified
+                verified_name = session.user_data.get("manual_name") or name
+                verified_id = session.user_data.get("manual_employee_id") or employee_id
+                set_user_verified(verified_name, verified_id)
+                self.save_sessions()
+                lang = get_preferred_language()
+                credentials_prompt = get_message("manual_credentials_verified", lang, name=verified_name or "")
+                combined_message = msg.strip() if msg else ""
+                if combined_message:
+                    combined_message = f"{combined_message}\n\n{credentials_prompt}"
+                else:
+                    combined_message = credentials_prompt
+                return True, combined_message, FlowState.CREDENTIAL_CHECK
+            else:
+                lang = get_preferred_language()
+                return False, (msg or get_message("manual_otp_failed", lang)), FlowState.MANUAL_VERIFICATION
+
+        # No OTP yet; send one
+        try:
+            from tools.employee_verification import send_otp_sync
+            msg, record = send_otp_sync(resolved_email, employee_id)
+        except ImportError:
+            try:
+                import nest_asyncio
+                nest_asyncio.apply()
+                msg = asyncio.run(get_employee_details(None, resolved_email, name, employee_id, None))
+            except Exception as async_error:
+                print(f"[Flow] Async OTP sending error: {async_error}")
+                lang = get_preferred_language()
+                return False, get_message("manual_otp_send_failed", lang, error=async_error), FlowState.MANUAL_VERIFICATION
+        except Exception as e:
+            print(f"[Flow] OTP sending error: {e}")
+            lang = get_preferred_language()
+            return False, get_message("manual_otp_send_failed", lang, error=e), FlowState.MANUAL_VERIFICATION
+
+        if record:
+            if record.get("name"):
+                session.user_data["manual_name"] = record.get("name")
+            if record.get("employee_id"):
+                session.user_data["manual_employee_id"] = record.get("employee_id")
+            if record.get("email"):
+                session.user_data["manual_email"] = record.get("email")
+
+        lang = get_preferred_language()
+        return False, (msg or get_message("manual_otp_sent", lang)), FlowState.MANUAL_VERIFICATION
     
     def process_face_registration_choice(self, register_face: bool) -> Tuple[bool, str, FlowState]:
         """Process face registration after manual verification"""
         session = self.get_current_session()
         if not session or not session.is_verified:
-            return False, "Invalid session or not verified", FlowState.IDLE
+            lang = get_preferred_language()
+            return False, get_message("manual_not_verified", lang), FlowState.IDLE
         
         if register_face:
             session.current_state = FlowState.FACE_REGISTRATION
@@ -209,81 +406,138 @@ class VirtualReceptionistFlow:
             try:
                 from flow_signal import post_signal
                 post_signal("start_face_registration", {
-                    "message": "Please look at the camera to register your face.",
+                    "message": get_message("face_registration_ready", get_preferred_language()),
                     "next_endpoint": "/flow/register_face"
                 })
             except Exception as _e:
                 print(f"Warning: could not post start_face_registration signal: {_e}")
             self.save_sessions()
-            return True, "Please look at the camera to register your face for future quick access.", FlowState.FACE_REGISTRATION
+            lang = get_preferred_language()
+            return True, get_message("face_registration_ready", lang), FlowState.FACE_REGISTRATION
         else:
+            # Skip face registration and go directly to conversation mode
             session.current_state = FlowState.EMPLOYEE_VERIFIED
             self.save_sessions()
-            return True, "No problem! You now have full access to all tools.", FlowState.EMPLOYEE_VERIFIED
+            lang = get_preferred_language()
+            return True, get_message("face_registration_skip_ack", lang), FlowState.EMPLOYEE_VERIFIED
     
-    def process_visitor_info(self, name: str, phone: str, purpose: str, host_employee: str) -> Tuple[bool, str, FlowState]:
-        """Process visitor information collection"""
+    def process_face_registration_completion(self, success: bool, message: str = None) -> Tuple[bool, str, FlowState]:
+        """Process face registration completion - matches flowchart"""
         session = self.get_current_session()
-        if not session or session.user_type != UserType.VISITOR:
-            return False, "Invalid session or user type", FlowState.IDLE
+        if not session or not session.is_verified:
+            return False, "Invalid session or not verified", FlowState.IDLE
         
-        session.user_data.update({
-            "visitor_name": name,
-            "visitor_phone": phone,
-            "visitor_purpose": purpose,
-            "host_employee": host_employee
-        })
-        session.current_state = FlowState.VISITOR_FACE_CAPTURE
-        self.save_sessions()
-        
-        return True, "Thank you! Please look at the camera so we can capture your photo for our visitor log.", FlowState.VISITOR_FACE_CAPTURE
+        if success:
+            # Face registration successful - transition to final state
+            session.current_state = FlowState.EMPLOYEE_VERIFIED
+            session.user_data["face_registered"] = True
+            self.save_sessions()
+            lang = get_preferred_language()
+            return True, get_message("face_registration_success", lang), FlowState.EMPLOYEE_VERIFIED
+        else:
+            # Face registration failed - still give access but without face registration
+            session.current_state = FlowState.EMPLOYEE_VERIFIED
+            self.save_sessions()
+            lang = get_preferred_language()
+            failure_detail = message or 'Unknown error'
+            return True, f"{get_message('face_registration_skip_ack', lang)} ({failure_detail})", FlowState.EMPLOYEE_VERIFIED
+    
+    async def process_visitor_info(self, name: str, phone: str, purpose: str, host_employee: str) -> Tuple[bool, str, FlowState]:
+        """Process visitor information collection"""
+        try:
+            print(f"[Flow] process_visitor_info starting with: name='{name}', phone='{phone}', purpose='{purpose}', host='{host_employee}'")
+
+            session = self.get_current_session()
+            if not session or session.user_type != UserType.VISITOR:
+                print(f"[Flow] ERROR: Invalid session or user type. Session: {session}, UserType: {session.user_type if session else 'None'}")
+                return False, "Invalid session or user type", FlowState.IDLE
+
+            lang = get_preferred_language()
+            trimmed_name = (name or "").strip()
+            trimmed_phone = (phone or "").strip()
+            trimmed_purpose = (purpose or "").strip()
+            trimmed_host = (host_employee or "").strip()
+
+            if not trimmed_name:
+                return False, get_message("visitor_need_name", lang), FlowState.VISITOR_INFO_COLLECTION
+            if not trimmed_phone:
+                return False, get_message("visitor_need_phone", lang), FlowState.VISITOR_INFO_COLLECTION
+            if not trimmed_purpose:
+                return False, get_message("visitor_need_purpose", lang), FlowState.VISITOR_INFO_COLLECTION
+            if not trimmed_host:
+                return False, get_message("visitor_need_host", lang), FlowState.VISITOR_INFO_COLLECTION
+
+            session.user_data.update({
+                "visitor_name": trimmed_name,
+                "visitor_phone": trimmed_phone,
+                "visitor_purpose": trimmed_purpose,
+                "host_employee": trimmed_host
+            })
+            session.current_state = FlowState.HOST_NOTIFICATION
+            session.last_activity = time.time()
+            self.save_sessions()
+            print(f"[Flow] Visitor info received: name='{trimmed_name}', phone='{trimmed_phone}', purpose='{trimmed_purpose}', host='{trimmed_host}'")
+
+            # Signal frontend to capture photo instead of creating placeholder
+            try:
+                from flow_signal import post_signal
+                print("[Flow] Emitting signal: start_visitor_photo -> /flow/visitor_photo")
+                post_signal("start_visitor_photo", {
+                    "message": get_message("flow_visitor_face_capture_prompt", lang),
+                    "next_endpoint": "/flow/visitor_photo",
+                    "visitor_name": trimmed_name
+                })
+                self.save_sessions()
+                print(f"[Flow] Photo capture signal sent for visitor: {trimmed_name}")
+                prompt = get_message("visitor_photo_prompt", lang, host=trimmed_host)
+                return True, prompt, FlowState.HOST_NOTIFICATION
+            except Exception as e:
+                print(f"[Flow] ERROR in photo signal: {e}")
+                import traceback
+                traceback.print_exc()
+                return True, get_message("flow_host_notification_prompt", lang), FlowState.FLOW_END
+
+        except Exception as e:
+            print(f"[Flow] CRITICAL ERROR in process_visitor_info: {e}")
+            import traceback
+            traceback.print_exc()
+            return False, f"Error processing visitor information: {str(e)}", FlowState.IDLE
     
     def process_visitor_face_capture(self, captured: bool = True) -> Tuple[bool, str, FlowState]:
         """Process visitor face capture"""
         session = self.get_current_session()
         if not session or session.user_type != UserType.VISITOR:
             return False, "Invalid session or user type", FlowState.IDLE
-        
+
         if captured:
             session.user_data["face_captured"] = True
             session.user_data["face_capture_time"] = datetime.now().isoformat()
-            session.current_state = FlowState.HOST_NOTIFICATION
-            
-            visitor_data = session.user_data
-            host_name = visitor_data.get('host_employee', 'Unknown')
-            
             session.current_state = FlowState.FLOW_END
             self.save_sessions()
-            
-            return True, f"Photo captured! {host_name} has been notified. Please wait at reception.", FlowState.FLOW_END
+
+            return True, "Visitor Photo captured!", FlowState.FLOW_END
         else:
-            return False, "Photo capture failed. Please try again.", FlowState.VISITOR_FACE_CAPTURE
-    
-    def process_tool_request(self, tool_name: str) -> Tuple[bool, str]:
-        """Process tool access requests"""
+            return False, "Photo capture failed. Please try again.", FlowState.HOST_NOTIFICATION
+
+    def check_tool_access(self, tool_name: str) -> Tuple[bool, str]:
         session = self.get_current_session()
-        
-        # Check if user has access
         if not session or not session.is_verified:
             if session and session.user_type == UserType.VISITOR:
                 return False, "Visitors have limited access. Your host will assist you with any information needed."
-            else:
-                return False, "Please verify your identity first. Say 'Hey Clara' to start the verification process."
-        
-        # Employee verified - grant access based on tool type
+            return False, "Please verify your identity first. Say 'Hey Clara' to start the verification process."
+
         restricted_tools = ['send_email', 'get_employee_details', 'company_info']
-        
+
         if tool_name in restricted_tools and session.user_type != UserType.EMPLOYEE:
             return False, "This tool requires employee access."
-        
+
         return True, f"Access granted for {tool_name}. How can I help you?"
-    
+
     def end_session(self) -> str:
         """End the current session"""
         session = self.get_current_session()
         if session:
             session.current_state = FlowState.FLOW_END
-            self.save_sessions()
         
         return "Thank you! Session completed. Say 'Hey Clara' if you need more assistance."
     

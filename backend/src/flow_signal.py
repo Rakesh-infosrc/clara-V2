@@ -42,5 +42,6 @@ def get_signal(clear: bool = True) -> Optional[Dict[str, Any]]:
 
 essential_actions = {
     "start_face_capture": "Ask the frontend to start face capture and send image to /flow/face_recognition",
+    "start_visitor_photo": "Ask the frontend to start visitor photo capture and send image to /flow/visitor_photo",
     "stop_face_capture": "Ask the frontend to stop camera",
 }

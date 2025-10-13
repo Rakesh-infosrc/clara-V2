@@ -5,6 +5,13 @@ import { APP_CONFIG_DEFAULTS } from '@/app-config';
 import { ApplyThemeScript, ThemeToggle } from '@/components/theme-toggle';
 import { getAppConfig } from '@/lib/utils';
 import './globals.css';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  icons: {
+    icon: '/app/icon.svg',
+  },
+};
 
 const publicSans = Public_Sans({
   variable: '--font-public-sans',

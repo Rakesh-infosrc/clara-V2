@@ -4,11 +4,23 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from language_utils import (
+    DEFAULT_LANGUAGE,
+    SUPPORTED_LANGUAGES,
+    resolve_language_code,
+    normalize_transcript,
+    get_message,
+    get_wake_phrases,
+    get_sleep_phrases,
+    any_phrase_in_text,
+)
+
 # -------------------- Global State Variables --------------------
 is_awake = False  # Clara starts sleeping - only responds to 'Hey Clara'
-wake_word = "hey clara"
+wake_word = "hey clara"  # English fallback for external integrations
 sleep_phrase = "go idle"
 last_activity = time.time()  # Track last interaction
+preferred_language = DEFAULT_LANGUAGE
 AUTO_SLEEP_TIMEOUT = 180  # 3 minutes of inactivity = auto sleep
 
 # -------------------- Shared State File --------------------
@@ -24,13 +36,13 @@ def wake_up():
     global is_awake, last_activity
     is_awake = True
     last_activity = time.time()
-    return "🤖 I'm awake! How can I help?"
+    return get_message("wake_ack", get_preferred_language())
 
 def go_to_sleep():
     """Put Clara to sleep state"""
     global is_awake
     is_awake = False
-    return "😴 Going idle, say 'Hey Clara' to wake me again."
+    return get_message("sleep_ack", get_preferred_language())
 
 def save_state_to_file():
     """Save current state to shared file"""
@@ -40,6 +52,7 @@ def save_state_to_file():
         "verified_user_name": verified_user_name,
         "verified_user_id": verified_user_id,
         "last_activity": last_activity,
+        "preferred_language": preferred_language,
         "timestamp": time.time()
     }
     
@@ -52,7 +65,7 @@ def save_state_to_file():
 
 def load_state_from_file():
     """Load state from shared file"""
-    global is_awake, is_verified, verified_user_name, verified_user_id, last_activity
+    global is_awake, is_verified, verified_user_name, verified_user_id, last_activity, preferred_language
     
     try:
         if STATE_FILE.exists():
@@ -64,6 +77,7 @@ def load_state_from_file():
             verified_user_name = state.get("verified_user_name")
             verified_user_id = state.get("verified_user_id")
             last_activity = state.get("last_activity", time.time())
+            preferred_language = resolve_language_code(state.get("preferred_language", DEFAULT_LANGUAGE))
     except Exception as e:
         print(f"Error loading state: {e}")
 
@@ -78,7 +92,7 @@ def check_auto_sleep():
     global is_awake, last_activity
     if is_awake and (time.time() - last_activity) > AUTO_SLEEP_TIMEOUT:
         is_awake = False
-        return "💤 Clara has gone idle due to inactivity. Say 'Hey Clara' to wake me up."
+        return get_message("auto_sleep_notice", get_preferred_language())
     return None
 
 def set_user_verified(name: str, user_id: str = None):
@@ -88,7 +102,7 @@ def set_user_verified(name: str, user_id: str = None):
     verified_user_name = name
     verified_user_id = user_id
     update_activity()  # This now saves state to file
-    print(f"✅ User verified: {name} (ID: {user_id})")
+    print(f" User verified: {name} (ID: {user_id})")
     
 def clear_verification():
     """Clear verification status"""
@@ -106,8 +120,76 @@ def get_state():
         "verified_user_name": verified_user_name,
         "verified_user_id": verified_user_id,
         "last_activity": datetime.fromtimestamp(last_activity).strftime("%Y-%m-%d %H:%M:%S"),
+        "preferred_language": preferred_language,
         "auto_sleep_in": max(0, AUTO_SLEEP_TIMEOUT - (time.time() - last_activity)) if is_awake else 0
     }
+
+def get_preferred_language() -> str:
+    return preferred_language or DEFAULT_LANGUAGE
+
+
+def set_preferred_language(lang_label: str) -> None:
+    global preferred_language
+    preferred_language = resolve_language_code(lang_label)
+    save_state_to_file()
+
+
+def _detect_language_by_script(text: str) -> str | None:
+    """Detect language by Unicode script blocks.
+
+    Returns a language code if a strong script signal is found, else None.
+    - Tamil:    U+0B80–U+0BFF
+    - Telugu:   U+0C00–U+0C7F
+    - Devanagari (Hindi): U+0900–U+097F
+    """
+    for ch in text:
+        cp = ord(ch)
+        # Devanagari (Hindi)
+        if 0x0900 <= cp <= 0x097F:
+            return "hi"
+        # Tamil
+        if 0x0B80 <= cp <= 0x0BFF:
+            return "ta"
+        # Telugu
+        if 0x0C00 <= cp <= 0x0C7F:
+            return "te"
+    return None
+
+
+def _infer_language_from_input(user_input: str) -> str:
+    text = user_input.strip()
+    # 1) Strong signal: unicode script detection
+    script_lang = _detect_language_by_script(text)
+    if script_lang in SUPPORTED_LANGUAGES:
+        return script_lang
+
+    # 2) Fallback to phrase-based detection using normalized lower text
+    text_lower = text.lower()
+    for candidate in SUPPORTED_LANGUAGES:
+        normalized = normalize_transcript(text_lower, candidate)
+        wake_phrases = get_wake_phrases(candidate)
+        sleep_phrases = get_sleep_phrases(candidate)
+        if any_phrase_in_text(normalized, wake_phrases) or any_phrase_in_text(normalized, sleep_phrases):
+            return candidate
+    return get_preferred_language()
+
+def _detect_language_switch_request(text: str) -> str | None:
+    lowered = text.lower()
+    patterns = {
+        "ta": ["talk in tamil", "speak tamil", "tamil la", "tamil lo"],
+        "te": ["talk in telugu", "speak telugu", "telugu lo", "telugu please"],
+        "hi": ["talk in hindi", "speak hindi", "hindi mein", "hindi please"],
+        "en": ["talk in english", "speak english", "english please"],
+    }
+    for lang_code, triggers in patterns.items():
+        for phrase in triggers:
+            if phrase in lowered:
+                return lang_code
+    detected = resolve_language_code(user_input)
+    if detected != DEFAULT_LANGUAGE:
+        return detected
+    return None
+
 
 def process_input(user_input: str) -> tuple[bool, str]:
     """
@@ -123,34 +205,48 @@ def process_input(user_input: str) -> tuple[bool, str]:
     """
     global is_awake
     
-    user_input_lower = user_input.lower().strip()
-    
+    switch_lang = _detect_language_switch_request(user_input)
+    if switch_lang:
+        set_preferred_language(switch_lang)
+        lang = get_preferred_language()
+        update_activity()
+        return True, get_message("language_support_affirm", lang)
+
+    detected_lang = _infer_language_from_input(user_input)
+    if detected_lang != get_preferred_language():
+        set_preferred_language(detected_lang)
+
+    lang = get_preferred_language()
+    normalized_input = normalize_transcript(user_input.strip(), lang)
+    wake_phrases = get_wake_phrases(lang)
+    sleep_phrases = get_sleep_phrases(lang)
+
     # Check for auto-sleep first
     auto_sleep_msg = check_auto_sleep()
     if auto_sleep_msg:
         return True, auto_sleep_msg
-    
+
     # If Clara is sleeping
     if not is_awake:
         # Only respond to the exact wake phrase
-        if wake_word == user_input_lower or wake_word in user_input_lower:
+        if any_phrase_in_text(normalized_input, wake_phrases):
             response = wake_up()
             return True, response
         else:
             # Clara is asleep, ignore ALL other inputs (no response at all)
             return False, ""
-    
+
     # Clara is awake - update activity
     update_activity()
-    
+
     # Check for sleep command
-    if sleep_phrase in user_input_lower:
+    if any_phrase_in_text(normalized_input, sleep_phrases):
         response = go_to_sleep()
         return True, response
-    
+
     # Check for wake command (redundant but for completeness)
-    if wake_word in user_input_lower:
-        return True, "🤖 I'm already awake! How can I help you?"
+    if any_phrase_in_text(normalized_input, wake_phrases):
+        return True, get_message("already_awake", lang)
     
     # Normal awake state - should respond to everything
     return True, ""

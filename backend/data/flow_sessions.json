@@ -1,117 +1,115 @@
 {
   "sessions": {
-    "session_1758703136446": {
-      "session_id": "session_1758703136446",
-      "current_state": "user_classification",
-      "user_type": "unknown",
-      "start_time": 1758703136.4468818,
-      "last_activity": 1758703136.4468818,
+    "session_1760330258919": {
+      "session_id": "session_1760330258919",
+      "current_state": "face_recognition",
+      "user_type": "employee",
+      "start_time": 1760330258.9195223,
+      "last_activity": 1760330289.4859114,
       "verification_attempts": 0,
       "user_data": {},
       "is_verified": false,
       "verification_method": null
     },
-    "session_1758703368347": {
-      "session_id": "session_1758703368347",
-      "current_state": "face_registration",
+    "session_1760331173530": {
+      "session_id": "session_1760331173530",
+      "current_state": "manual_verification",
+      "user_type": "employee",
+      "start_time": 1760331173.530945,
+      "last_activity": 1760331200.7363253,
+      "verification_attempts": 1,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1760331939549": {
+      "session_id": "session_1760331939549",
+      "current_state": "language_selection",
       "user_type": "unknown",
-      "start_time": 1758703368.3477294,
-      "last_activity": 1758703368.3477294,
+      "start_time": 1760331939.5497117,
+      "last_activity": 1760331939.5524776,
       "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1760332734628": {
+      "session_id": "session_1760332734628",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1760332734.6287982,
+      "last_activity": 1760332765.124318,
+      "verification_attempts": 1,
       "user_data": {
-        "manual_name": "Rakesh",
-        "manual_employee_id": "E002",
+        "manual_employee_id": "1307",
+        "manual_name": "Rakesh Reddy Bijjam",
+        "manual_email": "RakeshReddy.Bijjam@infoservices.com",
         "verification_method": "manual_with_otp"
       },
       "is_verified": true,
       "verification_method": null
     },
-    "session_1758704863229": {
-      "session_id": "session_1758704863229",
-      "current_state": "user_classification",
+    "session_1760336262188": {
+      "session_id": "session_1760336262188",
+      "current_state": "language_selection",
       "user_type": "unknown",
-      "start_time": 1758704863.229907,
-      "last_activity": 1758704863.229907,
+      "start_time": 1760336262.1886795,
+      "last_activity": 1760336262.194449,
       "verification_attempts": 0,
       "user_data": {},
       "is_verified": false,
       "verification_method": null
     },
-    "session_1758705365594": {
-      "session_id": "session_1758705365594",
-      "current_state": "user_classification",
+    "session_1760336513205": {
+      "session_id": "session_1760336513205",
+      "current_state": "language_selection",
       "user_type": "unknown",
-      "start_time": 1758705365.5940812,
-      "last_activity": 1758705365.5940812,
+      "start_time": 1760336513.2059093,
+      "last_activity": 1760336513.2096763,
       "verification_attempts": 0,
       "user_data": {},
       "is_verified": false,
       "verification_method": null
     },
-    "session_1758705443434": {
-      "session_id": "session_1758705443434",
-      "current_state": "user_classification",
-      "user_type": "unknown",
-      "start_time": 1758705443.4342008,
-      "last_activity": 1758705443.4342008,
-      "verification_attempts": 0,
-      "user_data": {},
-      "is_verified": false,
-      "verification_method": null
-    },
-    "session_1758708167522": {
-      "session_id": "session_1758708167522",
-      "current_state": "user_classification",
-      "user_type": "unknown",
-      "start_time": 1758708167.52282,
-      "last_activity": 1758708167.52282,
-      "verification_attempts": 0,
-      "user_data": {},
-      "is_verified": false,
-      "verification_method": null
-    },
-    "session_1758708203721": {
-      "session_id": "session_1758708203721",
-      "current_state": "flow_end",
-      "user_type": "unknown",
-      "start_time": 1758708203.722748,
-      "last_activity": 1758708203.722748,
-      "verification_attempts": 0,
+    "session_1760337150328": {
+      "session_id": "session_1760337150328",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1760337150.3289087,
+      "last_activity": 1760337176.2739322,
+      "verification_attempts": 2,
       "user_data": {
-        "manual_name": "Rakesh",
-        "manual_employee_id": "E002",
+        "manual_employee_id": "1307",
+        "manual_name": "Rakesh Reddy Bijjam",
+        "manual_email": "RakeshReddy.Bijjam@infoservices.com",
         "verification_method": "manual_with_otp"
       },
       "is_verified": true,
       "verification_method": null
     },
-    "session_1758709225025": {
-      "session_id": "session_1758709225025",
-      "current_state": "flow_end",
+    "session_1760337338529": {
+      "session_id": "session_1760337338529",
+      "current_state": "language_selection",
       "user_type": "unknown",
-      "start_time": 1758709225.0258434,
-      "last_activity": 1758709225.0258434,
+      "start_time": 1760337338.5290387,
+      "last_activity": 1760337338.534269,
       "verification_attempts": 0,
-      "user_data": {
-        "manual_name": "Rakesh",
-        "manual_employee_id": "E002",
-        "verification_method": "manual_with_otp"
-      },
-      "is_verified": true,
+      "user_data": {},
+      "is_verified": false,
       "verification_method": null
     },
-    "session_1758709370009": {
-      "session_id": "session_1758709370009",
-      "current_state": "flow_end",
-      "user_type": "unknown",
-      "start_time": 1758709370.0090408,
-      "last_activity": 1758709370.0090408,
-      "verification_attempts": 0,
+    "session_1760337495642": {
+      "session_id": "session_1760337495642",
+      "current_state": "manual_verification",
+      "user_type": "employee",
+      "start_time": 1760337495.642336,
+      "last_activity": 1760337523.9387524,
+      "verification_attempts": 1,
       "user_data": {},
       "is_verified": false,
       "verification_method": null
     }
   },
-  "current_session_id": "session_1758709370009",
-  "last_updated": 1758709416.8430803
+  "current_session_id": "session_1760337495642",
+  "last_updated": 1760337541.3830545
 }

@@ -6,13 +6,83 @@ This tool allows new employees to register their faces after manual verification
 
 import io
 import os
-import pickle
+from typing import Any
+
+import boto3
 import pandas as pd
 import face_recognition
 import numpy as np
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from datetime import datetime
 from livekit.agents import function_tool, RunContext
-from .config import ENCODING_FILE, EMPLOYEE_CSV
+
+from .config import (
+    ENCODING_FILE,
+    EMPLOYEE_CSV,
+    FACE_S3_BUCKET,
+    FACE_IMAGE_BUCKET,
+    FACE_IMAGE_PREFIX,
+    FACE_IMAGE_EXTENSION,
+    FACE_ENCODING_S3_KEY,
+)
+from .face_recognition import get_face_encoding_data, save_face_encoding_data
+
+
+_s3_client = None
+
+
+def _get_s3_client():
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client("s3")
+    return _s3_client
+
+
+def _employee_image_bucket() -> str | None:
+    return FACE_IMAGE_BUCKET or FACE_S3_BUCKET
+
+
+def _build_employee_image_key(employee_id: str) -> str:
+    prefix = (FACE_IMAGE_PREFIX or "").strip("/")
+    ext = (FACE_IMAGE_EXTENSION or "png").lstrip(".")
+    filename = f"{employee_id}.{ext}"
+    return f"{prefix}/{filename}" if prefix else filename
+
+
+def _guess_content_type(extension: str) -> str:
+    ext = extension.lower()
+    if ext in {"jpg", "jpeg"}:
+        return "image/jpeg"
+    if ext == "png":
+        return "image/png"
+    if ext == "webp":
+        return "image/webp"
+    return "application/octet-stream"
+
+
+def _upload_employee_image(employee_id: str, image_bytes: bytes) -> tuple[bool, str | None]:
+    bucket = _employee_image_bucket()
+    if not bucket or not image_bytes:
+        return False, None
+
+    key = _build_employee_image_key(employee_id)
+    content_type = _guess_content_type((FACE_IMAGE_EXTENSION or "png").lstrip("."))
+
+    try:
+        client = _get_s3_client()
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=image_bytes,
+            ContentType=content_type,
+        )
+        print(f"[FaceRegistration] Uploaded employee image to s3://{bucket}/{key}")
+        return True, f"s3://{bucket}/{key}"
+    except (BotoCoreError, ClientError, NoCredentialsError) as exc:
+        print(f"[FaceRegistration] Failed to upload employee image to S3 ({exc})")
+    except Exception as exc:
+        print(f"[FaceRegistration] Unexpected error uploading employee image: {exc}")
+    return False, None
 
 
 @function_tool()
@@ -29,12 +99,17 @@ async def register_employee_face(ctx: RunContext, employee_id: str, image_bytes:
             return "❌ No image data provided for face registration"
         
         # Load existing encodings
-        try:
-            with open(ENCODING_FILE, "rb") as f:
-                encoding_data = pickle.load(f)
-            known_encodings = encoding_data["encodings"]
-            known_ids = encoding_data["employee_ids"]
-        except FileNotFoundError:
+        encoding_data = get_face_encoding_data()
+        if encoding_data:
+            known_encodings = list(encoding_data.get("encodings", []))
+            legacy_ids = (
+                encoding_data.get("employee_ids")
+                or encoding_data.get("ids")
+                or encoding_data.get("names")
+                or []
+            )
+            known_ids = list(legacy_ids)
+        else:
             known_encodings = []
             known_ids = []
         
@@ -48,11 +123,11 @@ async def register_employee_face(ctx: RunContext, employee_id: str, image_bytes:
             
             employee_name = employee_match.iloc[0]["Name"]
         except Exception as e:
-            return f"❌ Error reading employee database: {str(e)}"
+            return f" Error reading employee database: {str(e)}"
         
         # Check if face is already registered
         if employee_id in known_ids:
-            return f"❌ Face already registered for employee {employee_name} (ID: {employee_id})"
+            return f"⚠️ Face already registered for {employee_name} (ID: {employee_id})"
         
         # Process the new face image
         try:
@@ -91,7 +166,7 @@ async def register_employee_face(ctx: RunContext, employee_id: str, image_bytes:
             "encodings": known_encodings,
             "employee_ids": known_ids
         }
-        
+
         # Backup the old file first
         backup_file = ENCODING_FILE + f".backup_{int(datetime.now().timestamp())}"
         try:
@@ -102,34 +177,33 @@ async def register_employee_face(ctx: RunContext, employee_id: str, image_bytes:
         except Exception as e:
             print(f"Warning: Could not create backup: {e}")
         
-        # Save the new encodings
-        try:
-            with open(ENCODING_FILE, "wb") as f:
-                pickle.dump(updated_encoding_data, f)
-            print(f"Face encodings updated successfully")
-        except Exception as e:
-            return f"❌ Error saving face encodings: {str(e)}"
+        if not save_face_encoding_data(updated_encoding_data):
+            return "❌ Error saving face encodings"
+
+        image_uploaded, image_location = _upload_employee_image(employee_id, image_bytes)
         
         # Log the registration
         log_entry = {
             "employee_id": employee_id,
             "employee_name": employee_name,
-            "registration_time": datetime.now().isoformat(),
             "status": "registered"
         }
         print(f"Face registration completed: {log_entry}")
         
         return (
-            f"✅ Face registration successful! 🎉\\n"
-            f"Welcome {employee_name} (ID: {employee_id})\\n"
-            f"Your face has been registered for quick access in the future.\\n"
-            f"Next time, you can simply show your face to the camera for instant verification."
+            "✅ Face registration successful! 🎉\n"
+            f"Welcome {employee_name} (ID: {employee_id}).\n"
+            "Your face has been registered for quick access in the future.\n"
+            "Next time, you can simply show your face to the camera for instant verification."
         )
         
     except Exception as e:
         error_msg = f"Face registration error: {str(e)}"
         print(f"❌ {error_msg}")
-        return f"❌ {error_msg}"
+        return (
+            f"❌ {error_msg}\n"
+            "Please contact the system administrator for assistance."
+        )
 
 
 @function_tool()
@@ -139,20 +213,24 @@ async def check_face_registration_status(ctx: RunContext, employee_id: str) -> s
     """
     try:
         # Load existing encodings
-        try:
-            with open(ENCODING_FILE, "rb") as f:
-                encoding_data = pickle.load(f)
-            known_ids = encoding_data["employee_ids"]
-        except FileNotFoundError:
-            return f"❌ Face recognition system not initialized"
+        encoding_data = get_face_encoding_data()
+        if not encoding_data:
+            return "❌ Face recognition system not initialized"
+
+        known_ids = (
+            encoding_data.get("employee_ids")
+            or encoding_data.get("ids")
+            or encoding_data.get("names")
+            or []
+        )
         
         if employee_id in known_ids:
-            return f"✅ Face is registered for employee ID {employee_id}"
+            return f" Face is registered for employee ID {employee_id}"
         else:
-            return f"❌ No face registered for employee ID {employee_id}"
-            
+            return f" No face registered for employee ID {employee_id}"
+        
     except Exception as e:
-        return f"❌ Error checking face registration status: {str(e)}"
+        return f" Error checking face registration status: {str(e)}"
 
 
 @function_tool()
@@ -162,13 +240,18 @@ async def remove_face_registration(ctx: RunContext, employee_id: str) -> str:
     """
     try:
         # Load existing encodings
-        try:
-            with open(ENCODING_FILE, "rb") as f:
-                encoding_data = pickle.load(f)
-            known_encodings = encoding_data["encodings"]
-            known_ids = encoding_data["employee_ids"]
-        except FileNotFoundError:
-            return f"❌ Face recognition system not initialized"
+        encoding_data = get_face_encoding_data()
+        if not encoding_data:
+            return f" Face recognition system not initialized"
+
+        known_encodings = list(encoding_data.get("encodings", []))
+        legacy_ids = (
+            encoding_data.get("employee_ids")
+            or encoding_data.get("ids")
+            or encoding_data.get("names")
+            or []
+        )
+        known_ids = list(legacy_ids)
         
         if employee_id not in known_ids:
             return f"❌ No face registration found for employee ID {employee_id}"
@@ -183,7 +266,7 @@ async def remove_face_registration(ctx: RunContext, employee_id: str) -> str:
             "encodings": known_encodings,
             "employee_ids": known_ids
         }
-        
+
         # Backup first
         backup_file = ENCODING_FILE + f".backup_{int(datetime.now().timestamp())}"
         try:
@@ -192,12 +275,15 @@ async def remove_face_registration(ctx: RunContext, employee_id: str) -> str:
                 shutil.copy2(ENCODING_FILE, backup_file)
         except Exception as e:
             print(f"Warning: Could not create backup: {e}")
-        
-        # Save the updated encodings
-        with open(ENCODING_FILE, "wb") as f:
-            pickle.dump(updated_encoding_data, f)
-        
+
+
+        if not save_face_encoding_data(updated_encoding_data):
+            return "❌ Error saving face encodings"
+
+        removed = f"s3://{_employee_image_bucket()}/{_build_employee_image_key(employee_id)}" if _employee_image_bucket() else None
+        if removed:
+            return f"✅ Face registration removed for employee ID {employee_id}. (Stored image will be overwritten on next registration: {removed})"
         return f"✅ Face registration removed for employee ID {employee_id}"
-        
+
     except Exception as e:
-        return f"❌ Error removing face registration: {str(e)}"
+        return f" Error removing face registration: {str(e)}"

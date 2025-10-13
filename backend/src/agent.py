@@ -1,28 +1,88 @@
+def _sanitize_response_text(text: str) -> str:
+    if not text:
+        return text
+
+
+def _get_state_fallback(session, lang: str, include_default: bool = True) -> str | None:
+    fallback_by_state = {
+        FlowState.USER_CLASSIFICATION: get_message("wake_prompt", lang),
+        FlowState.FACE_RECOGNITION: get_message("flow_face_recognition_prompt", lang),
+        FlowState.MANUAL_VERIFICATION: get_message("flow_manual_verification_prompt", lang),
+        FlowState.CREDENTIAL_CHECK: get_message("flow_credential_check_prompt", lang),
+        FlowState.FACE_REGISTRATION: get_message("flow_face_registration_prompt", lang),
+        FlowState.EMPLOYEE_VERIFIED: get_message("flow_employee_verified_prompt", lang),
+        FlowState.VISITOR_INFO_COLLECTION: get_message("flow_visitor_info_prompt", lang),
+        FlowState.VISITOR_FACE_CAPTURE: get_message("flow_visitor_face_capture_prompt", lang),
+        FlowState.HOST_NOTIFICATION: get_message("flow_host_notification_prompt", lang),
+        FlowState.FLOW_END: get_message("flow_end_prompt", lang),
+    }
+    if session and session.current_state in fallback_by_state:
+        fallback = fallback_by_state[session.current_state]
+        if fallback:
+            return _sanitize_response_text(fallback)
+    if include_default:
+        return get_message("language_support_affirm", lang)
+    return None
+    lang = get_preferred_language()
+    lowered = text.lower()
+    replacements = (
+        ("i am sorry, i am not able to understand", "language_support_affirm"),
+        ("i only speak english", "language_support_affirm"),
+        ("could you please speak in english", "language_support_affirm"),
+        ("i am currently limited to english", "language_support_affirm"),
+        ("prefer to speak in tamil", "language_support_affirm"),
+        ("prefer to speak in telugu", "language_support_affirm"),
+        ("prefer to speak in hindi", "language_support_affirm"),
+        ("prefer to speak in english", "language_support_affirm"),
+        ("i understand you prefer to speak", "language_support_affirm"),
+        ("what do you want to search for", "search_prompt"),
+        ("what would you like me to search for", "search_prompt"),
+    )
+    for phrase, message_key in replacements:
+        if phrase in lowered:
+            return get_message(message_key, lang)
+    if "i am sorry" in lowered and (
+        "don't support" in lowered
+        or "do not support" in lowered
+        or "don't speak" in lowered
+        or "do not speak" in lowered
+        or "cannot speak" in lowered
+        or "can't speak" in lowered
+    ):
+        return get_message("language_support_affirm", lang)
+    return text
 import os
 import time
 from dotenv import load_dotenv
 import logging
+from livekit.plugins import noise_cancellation, google
 from livekit.agents import WorkerOptions, cli, JobContext
 from livekit.agents import AgentSession, Agent, RoomInputOptions, function_tool
-from livekit.plugins import noise_cancellation, google
-from prompts import AGENT_INSTRUCTION, SESSION_INSTRUCTION
-from agent_state import is_awake, check_auto_sleep, process_input, get_state, update_activity
+from livekit.agents.llm.realtime import RealtimeError
+from agent_state import (
+    is_awake,
+    check_auto_sleep,
+    process_input,
+    get_state,
+    update_activity,
+    get_preferred_language,
+)
 from tools import (
     company_info,
     get_weather,
     send_email,
-    search_web,
     listen_for_commands,
     get_employee_details,
-    get_candidate_details,
-    log_and_notify_visitor,
     register_employee_face,
     check_face_registration_status,
     capture_visitor_photo,
     get_visitor_log,
+    search_web
 )
-from agent_state import is_verified, verified_user_name, verified_user_id
+from agent_state import verified_user_name, verified_user_id
 from flow_manager import flow_manager, FlowState, UserType
+from prompts import AGENT_INSTRUCTION
+from language_utils import get_message
  
  
 # Load environment variables
@@ -58,27 +118,76 @@ async def classify_user_type(user_input: str):
 @function_tool
 async def process_face_recognition(face_result_status: str, employee_name: str = None, employee_id: str = None):
     """Process face recognition results"""
-    # If no specific results provided, this suggests we should tell the user to use face recognition
-    if not face_result_status or face_result_status == "pending":
-        return "Please show your face to the camera for recognition. The system will automatically verify your identity."
-   
-    face_result = {
-        "status": face_result_status,
-        "name": employee_name,
-        "employeeId": employee_id
-    }
-    success, message, next_state = flow_manager.process_face_recognition_result(face_result)
-    return message
+    try:
+        # If no specific results provided, this suggests we should tell the user to use face recognition
+        if not face_result_status or face_result_status == "pending":
+            return "Please show your face to the camera for recognition. The system will automatically verify your identity."
+       
+        # If face recognition succeeded but no employee data provided, try to reuse active session (never cached state)
+        if face_result_status == "success" and not employee_name and not employee_id:
+            session = flow_manager.get_current_session()
+            if session and session.user_data:
+                employee_name = session.user_data.get("employee_name")
+                employee_id = session.user_data.get("employee_id")
+                print(f"[DEBUG] Retrieved from session: name={employee_name}, id={employee_id}")
+        
+        face_result = {
+            "status": face_result_status,
+            "name": employee_name,
+            "employeeId": employee_id
+        }
+        success, message, next_state = flow_manager.process_face_recognition_result(face_result)
+        return message
+    except Exception as e:
+        print(f"[ERROR] process_face_recognition: {e}")
+        return "I'm having trouble with face recognition. Please try manual verification instead."
  
 @function_tool
 async def trigger_face_recognition():
-    """Tell the user to use their camera for face recognition"""
+    """Tell the user to use their camera for face recognition and trigger frontend capture"""
+    try:
+        session = flow_manager.get_current_session()
+        if not session:
+            flow_manager.create_session()
+            session = flow_manager.get_current_session()
+
+        if session:
+            if session.is_verified:
+                return "You're already verified. How else may I assist you today?"
+            if session.user_type == UserType.UNKNOWN:
+                session.user_type = UserType.EMPLOYEE
+            session.current_state = FlowState.FACE_RECOGNITION
+            session.last_activity = time.time()
+            flow_manager.save_sessions()
+    except Exception as exc:
+        print(f"[WARN] trigger_face_recognition could not sync flow state: {exc}")
+
+    try:
+        from flow_signal import post_signal
+
+        post_signal("start_face_capture", {
+            "message": "Please show your face to the camera for employee verification",
+            "next_endpoint": "/flow/face_recognition",
+        })
+    except Exception as exc:
+        print(f"[WARN] trigger_face_recognition could not emit signal: {exc}")
+
     return "Please show your face to the camera now. I'll verify your identity automatically using our secure face recognition system."
  
 @function_tool
-async def verify_employee_credentials(name: str, employee_id: str, otp: str = None):
-    """Process manual employee verification"""
-    success, message, next_state = flow_manager.process_manual_verification_step(name, employee_id, otp)
+async def verify_employee_credentials(
+    email: str | None = None,
+    otp: str | None = None,
+    name: str | None = None,
+    employee_id: str | None = None,
+):
+    """Process manual employee verification using company email or employee ID with OTP."""
+    success, message, next_state = flow_manager.process_manual_verification_step(
+        email=email,
+        otp=otp,
+        name=name,
+        employee_id=employee_id,
+    )
     return message
  
 @function_tool
@@ -86,12 +195,42 @@ async def handle_face_registration_choice(register_face: bool):
     """Handle employee choice for face registration"""
     success, message, next_state = flow_manager.process_face_registration_choice(register_face)
     return message
+
+@function_tool
+async def complete_face_registration(success: bool, message: str = None):
+    """Complete face registration process after photo capture"""
+    success_result, response_message, next_state = flow_manager.process_face_registration_completion(success, message)
+    return response_message
  
 @function_tool
 async def collect_visitor_info(name: str, phone: str, purpose: str, host_employee: str):
     """Collect visitor information"""
-    success, message, next_state = flow_manager.process_visitor_info(name, phone, purpose, host_employee)
-    return message
+    try:
+        print(f"[Tool] collect_visitor_info called with: name='{name}', phone='{phone}', purpose='{purpose}', host='{host_employee}'")
+        
+        # Ensure session is properly set up for visitor
+        session = flow_manager.get_current_session()
+        if not session:
+            print("[Tool] No session found, creating new session")
+            flow_manager.create_session()
+            session = flow_manager.get_current_session()
+        
+        # Force set user type to VISITOR if not already set
+        if session.user_type != UserType.VISITOR:
+            print(f"[Tool] Fixing user type from {session.user_type} to VISITOR")
+            session.user_type = UserType.VISITOR
+            session.current_state = FlowState.VISITOR_INFO_COLLECTION
+            flow_manager.save_sessions()
+        
+        success, message, next_state = await flow_manager.process_visitor_info(name, phone, purpose, host_employee)
+        print(f"[Tool] collect_visitor_info result: success={success}, message='{message}', state={next_state}")
+        return message
+    except Exception as e:
+        error_msg = f"Error collecting visitor info: {str(e)}"
+        print(f"[Tool] collect_visitor_info ERROR: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        return f"I encountered an error while processing your information: {error_msg}. Please try again."
  
 @function_tool
 async def flow_capture_visitor_photo(captured: bool = True):
@@ -138,7 +277,7 @@ async def check_user_verification():
 @function_tool
 async def check_tool_access(tool_name: str):
     """Check if current user has access to a specific tool"""
-    has_access, message = flow_manager.process_tool_request(tool_name)
+    has_access, message = flow_manager.check_tool_access(tool_name)
     return message if not has_access else f"Access granted for {tool_name}"
  
 @function_tool
@@ -237,47 +376,52 @@ STATE MANAGEMENT:
  
 """ + AGENT_INSTRUCTION
        
+        tool_list = [
+            # Flow management tools
+            start_reception_flow,
+            classify_user_type,
+            process_face_recognition,
+            trigger_face_recognition,
+            verify_employee_credentials,
+            handle_face_registration_choice,
+            complete_face_registration,
+            collect_visitor_info,
+            flow_capture_visitor_photo,
+            check_flow_status,
+            end_current_session,
+            # Verification and access control
+            check_user_verification,
+            check_tool_access,
+            # Flow completion and help
+            cleanup_old_sessions,
+            get_flow_help,
+            sync_verification_status,
+            # Core business tools  
+            company_info,
+            get_employee_details,
+            listen_for_commands,
+            get_weather,
+            search_web,
+            send_email,
+            # log_and_notify_visitor,  # Removed - use collect_visitor_info instead
+            # Face registration tools
+            register_employee_face,
+            check_face_registration_status,
+            # Enhanced visitor tools
+            capture_visitor_photo,
+            get_visitor_log,
+        ]
+
+        # Filter out optional tools that may not be available (e.g., when dependencies are missing)
+        tool_list = [tool for tool in tool_list if tool is not None]
+
         super().__init__(
             instructions=clara_instructions,
             llm=google.beta.realtime.RealtimeModel(
                 voice="Aoede",
                 temperature=0.7,
             ),
-            tools=[
-                # Flow management tools
-                start_reception_flow,
-                classify_user_type,
-                process_face_recognition,
-                trigger_face_recognition,
-                verify_employee_credentials,
-                handle_face_registration_choice,
-                collect_visitor_info,
-                flow_capture_visitor_photo,
-                check_flow_status,
-                end_current_session,
-                # Verification and access control
-                check_user_verification,
-                check_tool_access,
-                # Flow completion and help
-                cleanup_old_sessions,
-                get_flow_help,
-                sync_verification_status,
-                # Core business tools  
-                company_info,
-                get_employee_details,
-                get_candidate_details,
-                listen_for_commands,
-                get_weather,
-                search_web,
-                send_email,
-                log_and_notify_visitor,
-                # Face registration tools
-                register_employee_face,
-                check_face_registration_status,
-                # Enhanced visitor tools
-                capture_visitor_photo,
-                get_visitor_log,
-            ],
+            tools=tool_list,
         )
        
     async def handle_message(self, message):
@@ -307,10 +451,15 @@ STATE MANAGEMENT:
         # If there's a state response (wake/sleep messages), handle flow
         if state_response:
             # If waking up, start the reception flow
-            if "I'm awake" in state_response or "awake" in state_response.lower():
+            lang = get_preferred_language()
+            wake_ack = get_message("wake_ack", lang)
+            if state_response == wake_ack or "I'm awake" in state_response or "awake" in state_response.lower():
                 print("🚀 Clara waking up - starting reception flow...")
                 flow_success, flow_message = flow_manager.process_wake_word_detected()
-                return flow_message  # Use only the flow message (includes greeting)
+                question = get_message("wake_prompt", lang)
+                combined_message = f"{flow_message}\n{question}" if flow_message else question
+                print(f"🔊 Combined wake message: '{combined_message}'")
+                return combined_message  # Use combined message
             return state_response
             
         # If Clara shouldn't respond (sleeping), do not emit 'None' to UI
@@ -328,89 +477,124 @@ STATE MANAGEMENT:
             
             # Provide context-aware responses based on current flow state
             if session.current_state == FlowState.USER_CLASSIFICATION:
+                print(f"🔍 In USER_CLASSIFICATION state, processing: '{text_content}'")
                 success, response, next_state = flow_manager.process_user_classification(text_content)
                 if success:
-                    print(f"✅ Classification successful: {response}")
+                    print(f"✅ Classification successful: '{response}', next_state: {next_state.value}")
+                    return response
+                else:
+                    print(f"❌ Classification failed: '{response}', staying in {session.current_state.value}")
                     return response
         
         # Context-aware fallback so we never send 'None' and keep a human feel
         try:
-            fallback_by_state = {
-                FlowState.USER_CLASSIFICATION: "Are you an employee or a visitor?",
-                FlowState.FACE_RECOGNITION: "I'm ready when you are — please look at the camera for a quick scan.",
-                FlowState.MANUAL_VERIFICATION: "Please share your name and employee ID. If you received an OTP, tell me now.",
-                FlowState.CREDENTIAL_CHECK: "Would you like me to register your face for faster access next time?",
-                FlowState.FACE_REGISTRATION: "Hold still and look at the camera — capturing your face now.",
-                FlowState.EMPLOYEE_VERIFIED: "You're all set. How can I help you today?",
-                FlowState.VISITOR_INFO_COLLECTION: "Please tell me your name, phone number, purpose of visit, and who you're meeting.",
-                FlowState.VISITOR_FACE_CAPTURE: "Please look at the camera so I can capture your photo for the visitor log.",
-                FlowState.HOST_NOTIFICATION: "I've notified your host. Please wait at reception.",
-                FlowState.FLOW_END: "Thanks! If you need anything else, just say 'Hey Clara'.",
-            }
-            if session and session.current_state in fallback_by_state:
-                fb = fallback_by_state[session.current_state]
-                if fb:
-                    return fb
+            lang = get_preferred_language()
+            fb = _get_state_fallback(session, lang, include_default=False)
+            if fb:
+                print(f"🔄 Using context fallback for state {session.current_state.value}: '{fb}'")
+                return fb
         except Exception as _e:
             print(f"(non-fatal) fallback generation error: {_e}")
 
         # Normal processing for awake state
         print("🧠 Processing with LLM...")
-        llm_response = await super().handle_message(message)
+        try:
+            llm_response = await super().handle_message(message)
+        except RealtimeError as err:
+            print(f"❗ Realtime generation error: {err}")
+            session = flow_manager.get_current_session()
+            lang = get_preferred_language()
+            fb = _get_state_fallback(session, lang, include_default=True)
+            print("🔄 Falling back after realtime error")
+            return fb
+        except Exception as err:
+            print(f"❗ Unexpected LLM error: {err}")
+            session = flow_manager.get_current_session()
+            lang = get_preferred_language()
+            fb = _get_state_fallback(session, lang, include_default=True)
+            print("🔄 Falling back after unexpected LLM error")
+            return fb
 
         # Safety guard: never emit None/empty; use context-aware fallback instead
         if not llm_response or str(llm_response).strip().lower() in {"none", "null"}:
             try:
                 session = flow_manager.get_current_session()
-                fallback_by_state = {
-                    FlowState.USER_CLASSIFICATION: "Are you an employee or a visitor?",
-                    FlowState.FACE_RECOGNITION: "I'm ready when you are — please look at the camera for a quick scan.",
-                    FlowState.MANUAL_VERIFICATION: "Please share your name and employee ID. If you received an OTP, tell me now.",
-                    FlowState.CREDENTIAL_CHECK: "Would you like me to register your face for faster access next time?",
-                    FlowState.FACE_REGISTRATION: "Hold still and look at the camera — capturing your face now.",
-                    FlowState.EMPLOYEE_VERIFIED: "You're all set. How can I help you today?",
-                    FlowState.VISITOR_INFO_COLLECTION: "Please tell me your name, phone number, purpose of visit, and who you're meeting.",
-                    FlowState.VISITOR_FACE_CAPTURE: "Please look at the camera so I can capture your photo for the visitor log.",
-                    FlowState.HOST_NOTIFICATION: "I've notified your host. Please wait at reception.",
-                    FlowState.FLOW_END: "Thanks! If you need anything else, just say 'Hey Clara'.",
-                }
-                if session and session.current_state in fallback_by_state:
-                    return fallback_by_state[session.current_state]
+                lang = get_preferred_language()
+                fallback = _get_state_fallback(session, lang, include_default=False)
+                if fallback:
+                    print(f"🔄 Using fallback for state {session.current_state.value}: '{fallback}'")
+                    return fallback
             except Exception as _e:
                 print(f"(non-fatal) final fallback error: {_e}")
-            return "Got it."
+            lang = get_preferred_language()
+            return get_message("language_support_affirm", lang)
 
-        return llm_response
+        sanitized_response = _sanitize_response_text(llm_response)
+        print(f"🔊 Final LLM response: '{sanitized_response}'")
+        return sanitized_response
  
 # -------------------------
 # Entrypoint for LiveKit worker
 # -------------------------
 async def entrypoint(ctx: JobContext):
-    # Load shared state on startup
-    from agent_state import load_state_from_file
-    load_state_from_file()
-   
-    print(f"🤖 Clara Agent starting in room: {ctx.room.name}")
-    print(f"🎯 Agent name: clara-receptionist")
-    print(f"🔊 Listening for 'Hey Clara' to activate...")
-   
-    # # Wait for participants to join
-    # await ctx.wait_for_participant()
-    # print(f"👥 Participant joined room: {ctx.room.name}")
-   
-    # Initialize AgentSession with proper assistant
-    assistant = Assistant()
-    session = AgentSession(
-        llm=assistant.llm,
-        tts=assistant.tts,
-        stt=assistant.stt,
-        userdata=assistant
+    # Configure logging
+    import logging
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('clara_debug.log')
+        ]
     )
- 
-    # Start the Agent session with the assistant and room
-    await session.start(assistant, room=ctx.room)
-   
-    print(f"✅ Clara connected and ready! State: LISTENING for 'Hey Clara'")
+    logger = logging.getLogger("clara")
+    
+    logger.info("🔍 Starting Clara Agent with debug logging...")
+    logger.debug(f"LiveKit URL: {os.getenv('LIVEKIT_URL')}")
+    
+    try:
+        # Load shared state on startup
+        from agent_state import load_state_from_file
+        load_state_from_file()
+        
+        logger.info(f"🤖 Starting in room: {ctx.room.name}")
+        logger.info("🔑 Checking environment variables...")
+        
+        # Verify required environment variables
+        required_vars = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            logger.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
+        logger.info("✅ Environment variables verified")
+        
+        # Initialize the assistant
+        logger.info("🚀 Initializing Clara assistant...")
+        assistant = Assistant()
+        
+        logger.info("🔌 Creating AgentSession...")
+        session = AgentSession(
+            llm=assistant.llm,
+            tts=assistant.tts,
+            stt=assistant.stt,
+            userdata=assistant
+        )
+        
+        logger.info("🌐 Connecting to LiveKit room...")
+        try:
+            await session.start(assistant, room=ctx.room)
+            logger.info("✅ Successfully connected to LiveKit room")
+            logger.info("👂 Listening for 'Hey Clara'...")
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to LiveKit: {str(e)}")
+            logger.exception("Full error details:")
+            raise
+            
+    except Exception as e:
+        logger.critical(f"🔥 Critical error in Clara agent: {str(e)}", exc_info=True)
+        raise
  
  
 # -------------------------

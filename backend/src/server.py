@@ -2,10 +2,16 @@ import os
 import uvicorn
 import time
 import random
+import json
+import warnings
+from datetime import datetime
 from fastapi import FastAPI, Query, File, UploadFile, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# Suppress pkg_resources deprecation warning from face_recognition_models
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
 
 # Ensure src package imports work when running from project root
 import sys
@@ -321,7 +327,16 @@ async def process_face_recognition_flow(image: UploadFile = File(...)):
         
         image_bytes = await image.read()
         face_result = run_face_verify(image_bytes)
-        
+\
+        if face_result.get("status") == "success":
+            try:
+                from agent_state import set_user_verified
+                emp_name = face_result.get("name")
+                emp_id = face_result.get("employeeId")
+                set_user_verified(emp_name, emp_id)
+            except Exception as _e:
+                print(f"Warning: could not sync agent state in /flow/face_recognition: {_e}")
+
         success, message, next_state = flow_manager.process_face_recognition_result(face_result)
         
         return {
@@ -340,22 +355,68 @@ async def process_face_recognition_flow(image: UploadFile = File(...)):
 
 @app.post("/flow/manual_verification")
 async def manual_verification_flow(request: dict):
-    """Process manual employee verification"""
+    """Process manual employee verification using the async tool directly.
+    This avoids running event loops inside flow_manager and ensures OTP is strictly checked.
+    """
     try:
-        from flow_manager import flow_manager
-        
+        from flow_manager import flow_manager, FlowState
+        from tools.employee_verification import get_employee_details
+        from agent_state import set_user_verified
+
         name = request.get('name')
         employee_id = request.get('employee_id')
         otp = request.get('otp')
-        
-        success, message, next_state = flow_manager.process_manual_verification_step(name, employee_id, otp)
-        
-        return {
-            "success": success,
-            "message": message,
-            "next_state": next_state.value if next_state else None,
-            "flow_status": flow_manager.get_flow_status()
-        }
+
+        if not name or not employee_id:
+            return {"success": False, "message": "Please provide both your name and employee ID.", "next_state": FlowState.MANUAL_VERIFICATION.value}
+
+        # Ensure session exists and store provided credentials
+        session = flow_manager.get_current_session()
+        if not session:
+            flow_manager.create_session()
+            session = flow_manager.get_current_session()
+        if session:
+            session.user_data.update({"manual_name": name, "manual_employee_id": employee_id})
+            flow_manager.save_sessions()
+
+        if not otp:
+            # Send/resend OTP (or show it in DEV mode)
+            msg = await get_employee_details(None, name, employee_id, None)
+            return {
+                "success": False,
+                "message": msg or "OTP has been sent to your registered email. Please provide the OTP to complete verification.",
+                "next_state": FlowState.MANUAL_VERIFICATION.value,
+                "flow_status": flow_manager.get_flow_status()
+            }
+
+        # Verify OTP
+        msg = await get_employee_details(None, name, employee_id, otp)
+        success = ("✅" in msg) and ("OTP verified" in msg or "Welcome" in msg)
+        if success:
+            # Mark verified and move to credential check (offer face registration)
+            if session:
+                session.user_data["verification_method"] = "manual_with_otp"
+                session.is_verified = True
+                session.current_state = FlowState.CREDENTIAL_CHECK
+                flow_manager.save_sessions()
+            try:
+                set_user_verified(name, employee_id)
+            except Exception as _e:
+                print(f"Warning: could not sync agent state after OTP verify: {_e}")
+
+            return {
+                "success": True,
+                "message": f"Credentials verified! Welcome {name}. Would you like to register your face for faster access next time? (Yes/No)",
+                "next_state": FlowState.CREDENTIAL_CHECK.value,
+                "flow_status": flow_manager.get_flow_status()
+            }
+        else:
+            return {
+                "success": False,
+                "message": msg or "OTP verification failed.",
+                "next_state": FlowState.MANUAL_VERIFICATION.value,
+                "flow_status": flow_manager.get_flow_status()
+            }
     except Exception as e:
         return {
             "success": False,
@@ -415,19 +476,19 @@ async def register_employee_face_endpoint(image: UploadFile = File(...), employe
         
         success = "✅" in result
         if success:
-            # Advance flow to verified and notify frontend
+            # Use the proper flow completion handler
             try:
-                session = flow_manager.get_current_session()
-                if session:
-                    from flow_manager import FlowState
-                    session.current_state = FlowState.EMPLOYEE_VERIFIED
-                    session.is_verified = True
-                    session.user_data["employee_id"] = employee_id
-                    flow_manager.save_sessions()
+                success_result, completion_message, next_state = flow_manager.process_face_registration_completion(True, result)
                 from flow_signal import post_signal
-                post_signal("registration_complete", {"message": "Face registration completed"})
+                post_signal("registration_complete", {"message": completion_message})
             except Exception as _e:
                 print(f"Warning: could not advance flow after registration: {_e}")
+        else:
+            # Handle registration failure
+            try:
+                success_result, completion_message, next_state = flow_manager.process_face_registration_completion(False, result)
+            except Exception as _e:
+                print(f"Warning: could not handle registration failure: {_e}")
         
         return {
             "success": success,
@@ -451,7 +512,7 @@ async def collect_visitor_info(request: dict):
         purpose = request.get('purpose')
         host_employee = request.get('host_employee')
         
-        success, message, next_state = flow_manager.process_visitor_info(name, phone, purpose, host_employee)
+        success, message, next_state = await flow_manager.process_visitor_info(name, phone, purpose, host_employee)
         
         return {
             "success": success,
@@ -475,7 +536,11 @@ async def capture_visitor_photo_flow(
     """Capture visitor photo and complete visitor flow"""
     try:
         from flow_manager import flow_manager
-        from tools.visitor_management import capture_visitor_photo, log_and_notify_visitor
+        from tools.visitor_management import (
+    capture_visitor_photo,
+    log_and_notify_visitor,
+    mark_visitor_photo_captured,
+)
 
         # Pick whichever file field was provided
         upload = image or file
@@ -486,9 +551,9 @@ async def capture_visitor_photo_flow(
                     upload = v
                     break
         if upload is None:
-            return {"success": False, "message": "No file uploaded (try field name 'image' or 'file')"}
+            return {"success": False, "message": "No image file uploaded (try field name 'image' or 'file')"}
 
-        # Pull visitor_name from session; fallback to form, else "Visitor"
+        # Get visitor name from session
         session = flow_manager.get_current_session()
         visitor_name = session.user_data.get('visitor_name') if session else None
         if not visitor_name:
@@ -499,28 +564,59 @@ async def capture_visitor_photo_flow(
                 pass
         visitor_name = visitor_name or "Visitor"
 
+        # Capture and save the actual image
         image_bytes = await upload.read()
-        photo_result = await capture_visitor_photo(None, visitor_name, image_bytes)
+        photo_result_raw = await capture_visitor_photo(None, visitor_name, image_bytes)
+        photo_result = {}
+        try:
+            photo_result = json.loads(photo_result_raw) if isinstance(photo_result_raw, str) else photo_result_raw
+        except Exception:
+            photo_result = {"success": True, "message": photo_result_raw, "storage_location": None}
 
-        # Advance flow
+        if photo_result and isinstance(photo_result, dict):
+            session.user_data["photo_location"] = photo_result.get("storage_location")
+            session.user_data["photo_storage_type"] = photo_result.get("storage_type")
+            session.user_data["photo_filename"] = photo_result.get("filename")
+            flow_manager.save_sessions()
+
+        visitor_phone = session.user_data.get('visitor_phone') if session else ""
+        visitor_purpose = session.user_data.get('visitor_purpose') if session else ""
+        host_employee = session.user_data.get('host_employee') if session else ""
+        photo_location = session.user_data.get("photo_location") if session else None
+
+        # Log visitor and notify host now that photo is captured
+        if visitor_name and host_employee:
+            try:
+                log_result = await log_and_notify_visitor(
+                    None,
+                    visitor_name,
+                    visitor_phone or "",
+                    visitor_purpose or "",
+                    host_employee,
+                    True,
+                    photo_location,
+                )
+                print(f"[VisitorPhoto] log_and_notify_visitor -> {log_result}")
+            except Exception as log_exc:
+                print(f"Warning: log_and_notify_visitor failed: {log_exc}")
+        else:
+            print("Warning: Skipping visitor log/notify due to missing visitor or host info")
+
+        # Mark visitor log as photo captured
+        try:
+            await mark_visitor_photo_captured(None, visitor_name)
+        except Exception as _e:
+            print(f"Warning: could not update visitor log photo flag: {_e}")
+
+        # Advance flow to completion
         success, message, next_state = flow_manager.process_visitor_face_capture(True)
-
-        # Log + notify if we have the required fields
-        if session and all(session.user_data.get(k) for k in ['visitor_name', 'visitor_phone', 'visitor_purpose', 'host_employee']):
-            await log_and_notify_visitor(
-                None,
-                session.user_data['visitor_name'],
-                session.user_data['visitor_phone'],
-                session.user_data['visitor_purpose'],
-                session.user_data['host_employee'],
-                True
-            )
 
         return {
             "success": success,
             "message": message,
             "next_state": next_state.value if next_state else None,
             "photo_result": photo_result,
+            "filename": f"{visitor_name}{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
             "flow_status": flow_manager.get_flow_status()
         }
     except Exception as e:
@@ -548,11 +644,24 @@ async def get_signal():
     """Get signals from the flow manager for frontend communication"""
     try:
         from flow_signal import get_signal
-        signal = get_signal(clear=True)  # Get and clear the signal
+        signal = get_signal(clear=False)  # Get but don't clear the signal immediately
         return signal if signal else {}
     except Exception as e:
         return {
             "error": f"Error getting signal: {str(e)}"
+        }
+
+@app.post("/clear_signal")
+async def clear_signal():
+    """Clear the current signal after frontend has processed it"""
+    try:
+        from flow_signal import get_signal
+        signal = get_signal(clear=True)  # Clear the signal
+        return {"success": True, "cleared": signal is not None}
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Error clearing signal: {str(e)}"
         }
 
 
