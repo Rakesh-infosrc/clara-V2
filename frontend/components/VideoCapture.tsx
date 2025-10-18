@@ -76,6 +76,9 @@ export default function VideoCapture() {
             // Clear the signal after processing
             console.log('[VideoCapture] Clearing processed start_face_capture signal');
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+            setTimeout(() => {
+              scanFace(true);
+            }, 500);
           } else if (signal && signal.name === 'start_visitor_info') {
             console.log('[VideoCapture] Switching to visitor info collection mode');
             setMode('visitor');
@@ -99,6 +102,9 @@ export default function VideoCapture() {
             // Clear the signal after processing
             console.log('[VideoCapture] Clearing processed start_visitor_photo signal');
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+            setTimeout(() => {
+              scanFace(true);
+            }, 500);
           }
         }
       } catch (error) {
@@ -133,10 +139,10 @@ export default function VideoCapture() {
   }, [verification.status, scanningEnabled]);
 
   // Face scanning function
-  const scanFace = async () => {
+  const scanFace = async (force: boolean = false) => {
     console.log('[VideoCapture] scanFace invoked. Mode:', mode, 'Status:', verification.status, 'Scanning enabled:', scanningEnabled);
     const video = videoRef.current;
-    if (!video || !scanningEnabled || verification.status === 'verified') return;
+    if (!video || (!scanningEnabled && !force) || verification.status === 'verified') return;
 
     const stream = (video.srcObject as MediaStream | null);
     const track = stream?.getVideoTracks?.()[0];
@@ -250,7 +256,7 @@ export default function VideoCapture() {
   const captureVisitorNow = async () => {
     if (mode !== 'visitor') return;
     // Temporarily trigger a scan once
-    await scanFace();
+    await scanFace(true);
   };
 
   // Manual mode selection helpers
@@ -259,6 +265,9 @@ export default function VideoCapture() {
     setMode('employee');
     setScanningEnabled(true);
     setVerification({ status: 'idle', message: 'Face recognition enabled - ready to scan', accessGranted: false });
+    setTimeout(() => {
+      scanFace(true);
+    }, 500);
   };
   const setVisitorMode = () => {
     console.log('[VideoCapture] Manually switching to visitor mode');

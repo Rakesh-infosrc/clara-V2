@@ -51,7 +51,6 @@ export function AgentControlBar({
   const {
     micTrackRef,
     visibleControls,
-    cameraToggle,
     microphoneToggle,
     screenShareToggle,
     handleAudioDeviceChange,
@@ -95,130 +94,7 @@ export function AgentControlBar({
     [onDeviceError]
   );
 
-  const triggerFaceRecognition = React.useCallback(() => {
-    const videoEl = document.querySelector('video');
-    if (!videoEl) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx?.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const formData = new FormData();
-      formData.append('image', blob, 'frame.jpg');
-
-      try {
-        const res = await fetch('http://127.0.0.1:8000/flow/face_recognition', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
-        if (!data?.success) {
-          console.warn('Face verification not successful:', data);
-        }
-      } catch (err) {
-        console.error('Face verification error', err);
-      }
-    }, 'image/jpeg');
-  }, []);
-
-  const triggerFaceRegistration = React.useCallback(() => {
-    const videoEl = document.querySelector('video');
-    if (!videoEl) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = videoEl.videoWidth;
-    canvas.height = videoEl.videoHeight;
-    const ctx = canvas.getContext('2d');
-    ctx?.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
-
-    canvas.toBlob(async (blob) => {
-      if (!blob) return;
-      const formData = new FormData();
-      formData.append('image', blob, 'register.jpg');
-      try {
-        const res = await fetch('http://127.0.0.1:8000/flow/register_face', {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
-        if (!data?.success) {
-          console.warn('Face registration failed:', data);
-        }
-      } catch (e) {
-        console.error('Face registration error', e);
-      }
-    }, 'image/jpeg', 0.9);
-  }, []);
-
-  // Poll backend signals to auto-trigger face capture and registration
-  React.useEffect(() => {
-    let cancelled = false;
-
-    async function clearSignal() {
-      try {
-        await fetch('http://127.0.0.1:8000/clear_signal', { method: 'POST' });
-      } catch {
-        /* ignore */
-      }
-    }
-
-    async function poll() {
-      if (cancelled) return;
-      try {
-        const res = await fetch('http://127.0.0.1:8000/get_signal', { cache: 'no-store' });
-        if (!res.ok) {
-          throw new Error(`Signal polling failed: ${res.status}`);
-        }
-        const data = await res.json();
-        if (cancelled || !data) {
-          return;
-        }
-
-        const signalName = data.name ?? data.type;
-        if (!signalName) {
-          return;
-        }
-
-        if (signalName === 'start_face_capture') {
-          if (!cameraToggle.enabled && !cameraToggle.pending) {
-            cameraToggle.toggle();
-            setTimeout(() => triggerFaceRecognition(), 1000);
-          } else {
-            triggerFaceRecognition();
-          }
-          await clearSignal();
-        } else if (signalName === 'start_face_registration') {
-          if (!cameraToggle.enabled && !cameraToggle.pending) {
-            cameraToggle.toggle();
-            setTimeout(() => triggerFaceRegistration(), 1000);
-          } else {
-            triggerFaceRegistration();
-          }
-          await clearSignal();
-        } else if (signalName === 'stop_face_capture') {
-          if (cameraToggle.enabled && !cameraToggle.pending) {
-            cameraToggle.toggle();
-          }
-          await clearSignal();
-        }
-      } catch (err) {
-        console.warn('[AgentControlBar] Signal polling error', err);
-      } finally {
-        if (!cancelled) {
-          setTimeout(poll, 1000);
-        }
-      }
-    }
-
-    poll();
-    return () => {
-      cancelled = true;
-    };
-  }, [cameraToggle, triggerFaceRecognition, triggerFaceRegistration]);
+  // LiveKit camera-based face capture disabled; VideoCapture component handles face scanning
 
 
   return (
@@ -290,43 +166,7 @@ export function AgentControlBar({
             </div>
           )}
 
-          {capabilities.supportsVideoInput && visibleControls.camera && (
-            <div className="flex items-center gap-0">
-              <TrackToggle
-                variant="primary"
-                source={Track.Source.Camera}
-                pressed={cameraToggle.enabled}
-                pending={cameraToggle.pending}
-                disabled={cameraToggle.pending}
-                onPressedChange={async (enabled) => {
-                  cameraToggle.toggle();
-
-                  if (enabled) {
-                    // ✅ Wait a moment for video track to be live
-                    setTimeout(() => {
-                      triggerFaceRecognition();
-                    }, 1000);
-                  }
-                }}
-                className="peer/track relative w-auto rounded-r-none pr-3 pl-3 disabled:opacity-100 md:border-r-0 md:pr-2"
-              />
-              <hr className="bg-separator1 peer-data-[state=off]/track:bg-separatorSerious relative z-10 -mr-px hidden h-4 w-px md:block" />
-              <DeviceSelect
-                size="sm"
-                kind="videoinput"
-                requestPermissions={false}
-                onMediaDeviceError={onCameraDeviceSelectError}
-                onActiveDeviceChange={handleVideoDeviceChange}
-                className={cn([
-                  'pl-2',
-                  'peer-data-[state=off]/track:text-destructive-foreground',
-                  'hover:text-fg1 focus:text-fg1',
-                  'hover:peer-data-[state=off]/track:text-destructive-foreground focus:peer-data-[state=off]/track:text-destructive-foreground',
-                  'rounded-l-none',
-                ])}
-              />
-            </div>
-          )}
+          {/* LiveKit camera toggle disabled; VideoCapture handles all camera input */}
 
 
           {capabilities.supportsScreenShare && visibleControls.screenShare && (

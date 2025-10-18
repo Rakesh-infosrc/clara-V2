@@ -14,6 +14,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { Welcome } from '@/components/welcome';
 import type { AppConfig } from '@/lib/types';
 import VideoCapture from "@/components/VideoCapture"
+import AnimatedBackground from '@/components/animated-background';
 
 const MotionWelcome = motion.create(Welcome);
 const MotionSessionView = motion.create(SessionView);
@@ -111,49 +112,52 @@ export function App({ appConfig }: AppProps) {
   const { startButtonText } = appConfig;
 
   return (
-    <main>
-      <MotionWelcome
-        key="welcome"
-        startButtonText={startButtonText}
-        onStartCall={() => setSessionStarted(true)}
-        disabled={sessionStarted}
-        initial={{ opacity: 1 }}
-        animate={{ opacity: sessionStarted ? 0 : 1 }}
-        transition={{
-          duration: 0.5,
-          ease: 'linear',
-          delay: sessionStarted ? 0 : 0.5,
-        }}
-      />
-
-      <RoomContext.Provider value={room}>
-        <RoomAudioRenderer />
-        <StartAudio label="Start Audio" />
-
-        <MotionSessionView
-          key="session-view"
-          appConfig={appConfig}
-          disabled={!sessionStarted}
-          sessionStarted={sessionStarted}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: sessionStarted ? 1 : 0 }}
+    <main className="relative min-h-screen overflow-hidden">
+      <AnimatedBackground />
+      <div className="relative z-10 flex min-h-screen flex-col">
+        <MotionWelcome
+          key="welcome"
+          startButtonText={startButtonText}
+          onStartCall={() => setSessionStarted(true)}
+          disabled={sessionStarted}
+          initial={{ opacity: 1 }}
+          animate={{ opacity: sessionStarted ? 0 : 1 }}
           transition={{
             duration: 0.5,
-            ease: "linear",
-            delay: sessionStarted ? 0.5 : 0,
+            ease: 'linear',
+            delay: sessionStarted ? 0 : 0.5,
           }}
         />
 
-        {/* 👇 Add Face Recognition UI here */}
-        {sessionStarted && (
-          <div className="absolute bottom-4 right-4 bg-blue-950 shadow-lg rounded-lg mb-34">
-            <VideoCapture />
-          </div>
-        )}
-      </RoomContext.Provider>
+        <RoomContext.Provider value={room}>
+          <RoomAudioRenderer />
+          <StartAudio label="Start Audio" />
+
+          <MotionSessionView
+            key="session-view"
+            appConfig={appConfig}
+            disabled={!sessionStarted}
+            sessionStarted={sessionStarted}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: sessionStarted ? 1 : 0 }}
+            transition={{
+              duration: 0.5,
+              ease: "linear",
+              delay: sessionStarted ? 0.5 : 0,
+            }}
+          />
+
+          {/* 👇 Add Face Recognition UI here */}
+          {sessionStarted && (
+            <div className="absolute bottom-4 right-4 bg-blue-950 shadow-lg rounded-lg mb-34">
+              <VideoCapture />
+            </div>
+          )}
+        </RoomContext.Provider>
 
 
-      <Toaster />
+        <Toaster />
+      </div>
     </main>
   );
 }

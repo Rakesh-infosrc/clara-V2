@@ -50,6 +50,11 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 TWILIO_DEFAULT_COUNTRY_CODE = os.getenv("TWILIO_DEFAULT_COUNTRY_CODE", "")
+GRAPH_CLIENT_ID = os.getenv("GRAPH_CLIENT_ID") or os.getenv("GRAPH_APPLICATION_ID")
+GRAPH_CLIENT_SECRET = os.getenv("GRAPH_CLIENT_SECRET")
+GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
+GRAPH_APP_OBJECT_ID = os.getenv("GRAPH_APP_OBJECT_ID")
+GRAPH_APP_DISPLAY_NAME = os.getenv("GRAPH_APP_DISPLAY_NAME") or "Clara Bot"
 
 # ---------------- Global Variables ----------------
 otp_sessions = defaultdict(dict)  # Track OTPs temporarily
@@ -91,6 +96,27 @@ def get_twilio_default_country_code() -> str | None:
     """Return default country code used when normalizing SMS phone numbers."""
     code = (TWILIO_DEFAULT_COUNTRY_CODE or "").strip()
     return code or None
+
+
+def get_graph_client_id() -> str | None:
+    return (GRAPH_CLIENT_ID or "").strip() or None
+
+
+def get_graph_client_secret() -> str | None:
+    return (GRAPH_CLIENT_SECRET or "").strip() or None
+
+
+def get_graph_tenant_id() -> str | None:
+    return (GRAPH_TENANT_ID or "").strip() or None
+
+
+def get_graph_app_object_id() -> str | None:
+    return (GRAPH_APP_OBJECT_ID or "").strip() or None
+
+
+def get_graph_app_display_name() -> str:
+    value = GRAPH_APP_DISPLAY_NAME or "Clara Bot"
+    return value.strip() or "Clara Bot"
 
 
 def get_visitor_photo_bucket() -> str | None:

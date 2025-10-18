@@ -14,7 +14,7 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   accent: '#002cf2',
   logoDark: '/InfoServices-Logo.svg',
   accentDark: '#1fd5f9',
-  startButtonText: 'Start call',
+  startButtonText: 'Talk To Clara',
 
   agentName: 'clara-receptionist',
 };

@@ -13,7 +13,11 @@ from .config import (
 from .employee_repository import get_employee_by_email, get_employee_by_id
 from .manager_visit_repository import get_manager_visit
 from .email_sender import send_email_via_gmail
-from .sms_sender import send_sms_via_twilio
+from .teams_sender import (
+    send_teams_message_sync,
+    GraphAuthError,
+    GraphSendError,
+)
 
 def _normalize_email(email: str | None) -> str:
     return (email or "").strip().lower()
@@ -74,7 +78,11 @@ def _issue_otp(email_key: str, record: dict) -> str:
     session["delivery_method"] = None
 
     emp_name = record.get("name") or "there"
-    emp_phone = record.get("phone") or record.get("mobile")
+    emp_email = email_key
+
+    delivery_method = None
+    delivery_details = None
+    teams_error: str | None = None
 
     if is_dev_mode_otp():
         return (
@@ -82,55 +90,37 @@ def _issue_otp(email_key: str, record: dict) -> str:
             f"Use this OTP to verify: {generated_otp}"
         )
 
-    # Try SMS first, fall back to email if no phone number
-    if emp_phone:
+    # Try Microsoft Teams when an email/UPN is available
+    if emp_email:
         try:
-            sms_message = f"Hello {emp_name}, your OTP is: {generated_otp}"
-            send_sms_via_twilio(
-                to_phone=emp_phone,
-                message=sms_message,
+            teams_content = (
+                f"<p>Hello {emp_name},</p>"
+                f"<p>Your one-time password is: <strong>{generated_otp}</strong></p>"
+                "<p>This code expires shortly. If you did not request it, please contact reception.</p>"
             )
-            delivery_method = "sms"
-            delivery_details = f"to {emp_phone}"
-        except RuntimeError as sms_error:
-            print(f"[OTP] SMS failed, trying email: {sms_error}")
-            # Fall back to email if SMS fails
-            gmail_user = get_gmail_user()
-            gmail_password = get_gmail_app_password()
-            if gmail_user and gmail_password:
-                try:
-                    email_message = f"Hello {emp_name}, your OTP is: {generated_otp}"
-                    send_email_via_gmail(
-                        to_email=email_key,
-                        subject="Your One-Time Password (OTP)",
-                        body=email_message,
-                    )
-                    delivery_method = "email"
-                    delivery_details = f"to {email_key}"
-                except RuntimeError as email_error:
-                    return f"❌ Both SMS and email sending failed. SMS: {sms_error}. Email: {email_error}"
-            else:
-                return f"❌ SMS failed and email credentials not configured: {sms_error}"
-    else:
-        # No phone number, try email
-        gmail_user = get_gmail_user()
-        gmail_password = get_gmail_app_password()
-        if not gmail_user or not gmail_password:
-            return "❌ No phone number found and email credentials not configured."
+            send_teams_message_sync(
+                user_principal_name=emp_email,
+                message=teams_content,
+                subject="Clara OTP",
+            )
+            delivery_method = "teams"
+            delivery_details = f"via Teams DM to {emp_email}"
+        except (GraphAuthError, GraphSendError) as exc:
+            teams_error = str(exc)
+            print(
+                "[OTP] Teams delivery failed",
+                {
+                    "email": emp_email,
+                    "error": teams_error,
+                },
+            )
 
-        email_message = f"Hello {emp_name}, your OTP is: {generated_otp}"
-        try:
-            # Wait, I need to import the email sender back
-            from .email_sender import send_email_via_gmail
-            send_email_via_gmail(
-                to_email=email_key,
-                subject="Your One-Time Password (OTP)",
-                body=email_message,
-            )
-            delivery_method = "email"
-            delivery_details = f"to {email_key}"
-        except RuntimeError as email_error:
-            return f"❌ Email sending failed: {email_error}"
+    if not delivery_method:
+        failure_reason = teams_error or "Teams delivery not available."
+        return (
+            "❌ I couldn't send the OTP via Teams right now. "
+            f"Reason: {failure_reason}"
+        )
 
     session["delivery_method"] = delivery_method
     session["delivery_log"] = {
@@ -139,6 +129,7 @@ def _issue_otp(email_key: str, record: dict) -> str:
         "details": delivery_details,
         "otp": generated_otp,
         "employee": emp_name,
+        "teams_error": teams_error,
     }
     print(
         f"[OTP] {delivery_method.upper()} dispatched",

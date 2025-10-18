@@ -537,64 +537,31 @@ STATE MANAGEMENT:
 # Entrypoint for LiveKit worker
 # -------------------------
 async def entrypoint(ctx: JobContext):
-    # Configure logging
-    import logging
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler('clara_debug.log')
-        ]
+    # Load shared state on startup
+    from agent_state import load_state_from_file
+    load_state_from_file()
+   
+    print(f"🤖 Clara Agent starting in room: {ctx.room.name}")
+    print(f"🎯 Agent name: clara-receptionist")
+    print(f"🔊 Listening for 'Hey Clara' to activate...")
+   
+    # # Wait for participants to join
+    # await ctx.wait_for_participant()
+    # print(f"👥 Participant joined room: {ctx.room.name}")
+   
+    # Initialize AgentSession with proper assistant
+    assistant = Assistant()
+    session = AgentSession(
+        llm=assistant.llm,
+        tts=assistant.tts,
+        stt=assistant.stt,
+        userdata=assistant
     )
-    logger = logging.getLogger("clara")
-    
-    logger.info("🔍 Starting Clara Agent with debug logging...")
-    logger.debug(f"LiveKit URL: {os.getenv('LIVEKIT_URL')}")
-    
-    try:
-        # Load shared state on startup
-        from agent_state import load_state_from_file
-        load_state_from_file()
-        
-        logger.info(f"🤖 Starting in room: {ctx.room.name}")
-        logger.info("🔑 Checking environment variables...")
-        
-        # Verify required environment variables
-        required_vars = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-        
-        if missing_vars:
-            logger.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
-            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
-        
-        logger.info("✅ Environment variables verified")
-        
-        # Initialize the assistant
-        logger.info("🚀 Initializing Clara assistant...")
-        assistant = Assistant()
-        
-        logger.info("🔌 Creating AgentSession...")
-        session = AgentSession(
-            llm=assistant.llm,
-            tts=assistant.tts,
-            stt=assistant.stt,
-            userdata=assistant
-        )
-        
-        logger.info("🌐 Connecting to LiveKit room...")
-        try:
-            await session.start(assistant, room=ctx.room)
-            logger.info("✅ Successfully connected to LiveKit room")
-            logger.info("👂 Listening for 'Hey Clara'...")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to LiveKit: {str(e)}")
-            logger.exception("Full error details:")
-            raise
-            
-    except Exception as e:
-        logger.critical(f"🔥 Critical error in Clara agent: {str(e)}", exc_info=True)
-        raise
+ 
+    # Start the Agent session with the assistant and room
+    await session.start(assistant, room=ctx.room)
+   
+    print(f"✅ Clara connected and ready! State: LISTENING for 'Hey Clara'")
  
  
 # -------------------------

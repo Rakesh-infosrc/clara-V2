@@ -21,6 +21,11 @@ from .visitor_log_repository import (
 )
 from .sms_sender import send_sms_via_twilio
 from .employee_repository import get_employee_by_name
+from .teams_sender import (
+    send_teams_message_sync,
+    GraphAuthError,
+    GraphSendError,
+)
 
 
 _s3_client = None
@@ -174,6 +179,7 @@ async def log_and_notify_visitor(
         notification_error: str | None = None
         notification_method: str | None = None
         notification_sid: str | None = None
+        teams_error: str | None = None
 
         if not emp_email:
             notification_error = "Host email not found."
@@ -191,8 +197,37 @@ async def log_and_notify_visitor(
             f"{photo_status}. Logged at {timestamp}."
         )
 
-        # Try SMS first when phone is available
-        if emp_phone:
+        # Try Microsoft Teams via Graph when email/UPN is available
+        if emp_email:
+            try:
+                teams_body = (
+                    f"👋 <strong>{meeting_employee}</strong>,<br/>"
+                    f"Visitor <strong>{visitor_name}</strong> ({phone or 'no phone'}) just arrived.<br/>"
+                    f"Purpose: {purpose or 'not provided'}<br/>"
+                    f"{photo_status}<br/>"
+                    f"Logged at {timestamp}"
+                )
+                send_teams_message_sync(
+                    user_principal_name=emp_email,
+                    message=teams_body,
+                    subject=f"Visitor {visitor_name} has arrived",
+                )
+                notification_sent = True
+                notification_method = "teams"
+            except (GraphAuthError, GraphSendError) as teams_exc:
+                teams_error = str(teams_exc)
+                notification_error = f"Teams notification failed: {teams_error}"
+                print(
+                    "[Visitor] Teams notification failed",
+                    {
+                        "employee": meeting_employee,
+                        "email": emp_email,
+                        "error": teams_error,
+                    },
+                )
+
+        # Try SMS next when phone is available
+        if not notification_sent and emp_phone:
             try:
                 result = send_sms_via_twilio(
                     to_phone=emp_phone,
@@ -219,9 +254,10 @@ async def log_and_notify_visitor(
                     notification_method = "email"
                 except RuntimeError as email_error:
                     combined = f"Email notification failed: {email_error}"
-                    notification_error = (
-                        f"{notification_error}; {combined}" if notification_error else combined
-                    )
+                    if notification_error:
+                        notification_error = f"{notification_error}; {combined}"
+                    else:
+                        notification_error = combined
             elif not notification_error:
                 notification_error = "No phone or email available for host notification"
 
@@ -236,6 +272,7 @@ async def log_and_notify_visitor(
                     "email": emp_email,
                     "message": message_text,
                     "sid": notification_sid,
+                    "teams_error": teams_error,
                 },
             )
         elif notification_error:
@@ -247,6 +284,7 @@ async def log_and_notify_visitor(
                     "phone": emp_phone,
                     "email": emp_email,
                     "error": notification_error,
+                    "teams_error": teams_error,
                 },
             )
 
@@ -260,6 +298,7 @@ async def log_and_notify_visitor(
             "notification_sid": notification_sid,
             "local_timestamp": timestamp,
             "photo_location": photo_location,
+            "teams_error": teams_error,
         }
         metadata = {k: v for k, v in metadata_raw.items() if v not in (None, "")}
 
