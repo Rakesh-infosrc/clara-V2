@@ -17,7 +17,6 @@ from datetime import datetime
 from livekit.agents import function_tool, RunContext
 
 from .config import (
-    ENCODING_FILE,
     EMPLOYEE_CSV,
     FACE_S3_BUCKET,
     FACE_IMAGE_BUCKET,
@@ -167,16 +166,6 @@ async def register_employee_face(ctx: RunContext, employee_id: str, image_bytes:
             "employee_ids": known_ids
         }
 
-        # Backup the old file first
-        backup_file = ENCODING_FILE + f".backup_{int(datetime.now().timestamp())}"
-        try:
-            if os.path.exists(ENCODING_FILE):
-                import shutil
-                shutil.copy2(ENCODING_FILE, backup_file)
-                print(f"Backup created: {backup_file}")
-        except Exception as e:
-            print(f"Warning: Could not create backup: {e}")
-        
         if not save_face_encoding_data(updated_encoding_data):
             return "❌ Error saving face encodings"
 
@@ -266,16 +255,6 @@ async def remove_face_registration(ctx: RunContext, employee_id: str) -> str:
             "encodings": known_encodings,
             "employee_ids": known_ids
         }
-
-        # Backup first
-        backup_file = ENCODING_FILE + f".backup_{int(datetime.now().timestamp())}"
-        try:
-            if os.path.exists(ENCODING_FILE):
-                import shutil
-                shutil.copy2(ENCODING_FILE, backup_file)
-        except Exception as e:
-            print(f"Warning: Could not create backup: {e}")
-
 
         if not save_face_encoding_data(updated_encoding_data):
             return "❌ Error saving face encodings"

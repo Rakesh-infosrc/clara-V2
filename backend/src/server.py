@@ -173,7 +173,11 @@ async def otp_send(request: EmployeeVerificationRequest):
     """Send OTP (or return dev OTP when DEV_MODE_OTP=true)."""
     try:
         from tools.employee_verification import get_employee_details
-        msg = await get_employee_details(None, request.name, request.employee_id, None)
+        msg = await get_employee_details(
+            None,
+            name=request.name,
+            employee_id=request.employee_id,
+        )
         return {"success": True, "message": msg}
     except Exception as e:
         return {"success": False, "message": f"otp_send failed: {str(e)}"}
@@ -187,7 +191,12 @@ async def otp_verify(request: EmployeeVerificationRequest):
         from agent_state import set_user_verified
         from flow_manager import flow_manager, FlowState
 
-        msg = await get_employee_details(None, request.name, request.employee_id, request.otp)
+        msg = await get_employee_details(
+            None,
+            name=request.name,
+            employee_id=request.employee_id,
+            otp=request.otp,
+        )
         success = ("✅" in msg) and ("OTP verified" in msg or "Welcome" in msg)
         if success:
             set_user_verified(request.name, request.employee_id)
@@ -214,14 +223,14 @@ async def employee_verify_endpoint(request: EmployeeVerificationRequest):
         context = None  # The tool doesn't actually use the context parameter
         
         result = await get_employee_details(
-            context, 
-            request.name, 
-            request.employee_id, 
-            request.otp
+            context,
+            name=request.name,
+            employee_id=request.employee_id,
+            otp=request.otp,
         )
         
         # Parse the result to determine success/failure
-        if "✅" in result:
+        if " " in result:
             if "OTP verified" in result or "Welcome" in result:
                 return {
                     "success": True,
@@ -638,6 +647,28 @@ async def get_flow_status():
             "message": f"Error getting flow status: {str(e)}"
         }
 
+
+@app.post("/post_signal")
+async def post_signal_endpoint(request: Request):
+    try:
+        body = await request.json()
+    except Exception as e:
+        return {"success": False, "error": f"Invalid JSON payload: {str(e)}"}
+
+    name = body.get("name") if isinstance(body, dict) else None
+    if not name:
+        return {"success": False, "error": "Signal name is required"}
+
+    payload = body.get("payload") if isinstance(body, dict) else None
+    if payload is not None and not isinstance(payload, dict):
+        return {"success": False, "error": "Signal payload must be an object"}
+
+    try:
+        from flow_signal import post_signal
+        post_signal(name, payload)
+        return {"success": True, "name": name, "payload": payload or {}}
+    except Exception as e:
+        return {"success": False, "error": f"Error posting signal: {str(e)}"}
 
 @app.get("/get_signal")
 async def get_signal():

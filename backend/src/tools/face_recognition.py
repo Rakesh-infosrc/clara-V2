@@ -1,5 +1,6 @@
 import io
 import pickle
+import random
 from typing import Any
 
 import boto3
@@ -13,8 +14,11 @@ from .config import (
     FACE_S3_BUCKET,
     FACE_IMAGE_BUCKET,
     FACE_ENCODING_S3_KEY,
+    otp_sessions,
 )
 from .employee_repository import get_employee_by_id
+from .sms_sender import send_sms_via_sns
+from .visitor_log_repository import put_visitor_log
 
 
 _s3_client = None
@@ -30,25 +34,35 @@ def _get_s3_client():
 
 
 def _encoding_bucket() -> str | None:
-    return FACE_IMAGE_BUCKET or FACE_S3_BUCKET
+    return FACE_S3_BUCKET or FACE_IMAGE_BUCKET
 
 
-def _read_encoding_bytes_from_s3() -> bytes | None:
+def _read_encoding_blob_from_s3() -> bytes | None:
     bucket = _encoding_bucket()
     key = FACE_ENCODING_S3_KEY
+
     if not bucket or not key:
         return None
 
     try:
         client = _get_s3_client()
         response = client.get_object(Bucket=bucket, Key=key)
-        blob: bytes = response["Body"].read()
-        return blob
     except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-        print(f"[FaceRecognition] S3 download failed ({exc})")
+        print(f"[FaceRecognition] Failed to download encodings from S3 ({exc})")
+        return None
     except Exception as exc:
-        print(f"[FaceRecognition] Unexpected error while reading encodings from S3: {exc}")
-    return None
+        print(f"[FaceRecognition] Unexpected error fetching encodings from S3: {exc}")
+        return None
+
+    body = response.get("Body")
+    if body is None:
+        return None
+
+    try:
+        return body.read()
+    except Exception as exc:
+        print(f"[FaceRecognition] Failed to read S3 encoding payload: {exc}")
+        return None
 
 
 def get_face_encoding_data(force_reload: bool = False) -> dict[str, Any] | None:
@@ -56,7 +70,7 @@ def get_face_encoding_data(force_reload: bool = False) -> dict[str, Any] | None:
     if not force_reload and _encoding_cache is not None:
         return _encoding_cache
 
-    blob = _read_encoding_bytes_from_s3()
+    blob = _read_encoding_blob_from_s3()
 
     if blob is None:
         _encoding_cache = None
@@ -87,29 +101,28 @@ def save_face_encoding_data(data: dict[str, Any]) -> bool:
         print(f"[FaceRecognition] Failed to serialize face encodings: {exc}")
         return False
 
-    success = True
-
     bucket = _encoding_bucket()
     key = FACE_ENCODING_S3_KEY
-    if bucket and key:
-        try:
-            client = _get_s3_client()
-            client.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=blob,
-                ContentType="application/octet-stream",
-            )
-        except (BotoCoreError, ClientError, NoCredentialsError) as exc:
-            print(f"[FaceRecognition] Failed to upload encodings to S3 ({exc})")
-            success = False
-        except Exception as exc:
-            print(f"[FaceRecognition] Unexpected error uploading encodings to S3: {exc}")
-            success = False
+    if not bucket or not key:
+        print("[FaceRecognition] S3 bucket/key not configured; cannot save encodings")
+        return False
 
+    try:
+        client = _get_s3_client()
+        client.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=blob,
+            ContentType="application/octet-stream",
+        )
         invalidate_face_encoding_cache()
+        return True
+    except (BotoCoreError, ClientError, NoCredentialsError) as exc:
+        print(f"[FaceRecognition] Failed to upload encodings to S3 ({exc})")
+    except Exception as exc:
+        print(f"[FaceRecognition] Unexpected error uploading encodings to S3: {exc}")
 
-    return success
+    return False
 
 
 def _get_employee_name(employee_id: str) -> str | None:
@@ -138,6 +151,68 @@ def _get_employee_name(employee_id: str) -> str | None:
         _employee_cache[key] = name
 
     return name
+
+
+def _dispatch_face_verification_otp(employee_id: str, employee_name: str) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "otpSent": False,
+        "message": None,
+        "phone": None,
+        "visitorLogId": None,
+    }
+
+    record = get_employee_by_id(employee_id)
+    if not record:
+        result["message"] = "Employee record not found for OTP dispatch"
+        return result
+
+    phone_number = (record.get("phone") or "").strip()
+    if not phone_number:
+        result["message"] = "Employee phone number not available"
+        return result
+
+    generated_otp = f"{random.randint(100000, 999999)}"
+    otp_sessions[employee_id] = {
+        "otp": generated_otp,
+        "verified": False,
+        "timestamp": datetime.utcnow().isoformat(),
+        "employee_name": employee_name,
+        "phone": phone_number,
+    }
+
+    message = (
+        f"Hello {employee_name}, your Clara verification code is {generated_otp}. "
+        "Use this OTP to complete your sign-in."
+    )
+
+    try:
+        send_sms_via_sns(phone_number, message)
+        result["otpSent"] = True
+        result["message"] = "OTP sent via SNS"
+        result["phone"] = phone_number
+    except Exception as exc:
+        result["message"] = f"Failed to send OTP: {exc}"
+
+    try:
+        metadata = {
+            "employee_id": employee_id,
+            "otp_sent": result["otpSent"],
+            "phone": phone_number,
+        }
+        log_entry = put_visitor_log(
+            visitor_name=employee_name,
+            phone=phone_number,
+            purpose="Employee face verification",
+            meeting_employee=employee_name,
+            photo_captured=False,
+            metadata=metadata,
+        )
+        if log_entry and log_entry.get("visit_id"):
+            result["visitorLogId"] = log_entry["visit_id"]
+    except Exception as exc:
+        print(f"[FaceRecognition] Failed to log visitor entry: {exc}")
+
+    return result
 
 
 # Pure function (can be used in API + agent)
@@ -176,6 +251,7 @@ def run_face_verify(image_bytes: bytes):
             or encoding_data.get("names")
             or []
         )
+        print(f"Loaded {len(known_encodings)} encodings and {len(known_ids)} IDs")
 
         if not known_encodings or not known_ids:
             return {"status": "error", "message": "Face database is empty"}
@@ -192,9 +268,9 @@ def run_face_verify(image_bytes: bytes):
         face_encoding = encodings[0]
         print(f"Face encoding generated successfully")
 
-        # Compare with known encodings using lenient tolerance
+        # Compare with known encodings using a strict tolerance to avoid false matches
         print(f"Comparing against {len(known_encodings)} known faces...")
-        tolerance = 0.7  # More lenient tolerance for better recognition
+        tolerance = 0.55
         matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=tolerance)
         
         # Also get face distances for additional validation
@@ -206,32 +282,39 @@ def run_face_verify(image_bytes: bytes):
             best_match_index = face_distances.argmin()
             best_distance = face_distances[best_match_index]
             print(f"Best match distance: {best_distance} (threshold: {tolerance})")
-            
-            # Use lenient threshold for better user experience
-            security_threshold = 0.6  # More lenient threshold
-            
+
+            # Security threshold matches the relaxed tolerance for consistent acceptance
+            security_threshold = 0.55
+            min_confidence_gap = 0.05
+
             if best_distance <= security_threshold and matches[best_match_index]:
-                # Double-check: ensure this is significantly better than other matches
                 other_distances = [d for i, d in enumerate(face_distances) if i != best_match_index]
+                confidence_gap = None
                 if other_distances:
                     second_best = min(other_distances)
                     confidence_gap = second_best - best_distance
-                    print(f"Confidence gap: {confidence_gap} (required: >0.05)")
-                    
-                    # Require reasonable gap between best and second-best match
-                    if confidence_gap > 0.05:
-                        emp_id = known_ids[best_match_index]
-                        emp_name = _get_employee_name(emp_id) or "Unknown"
-                        print(f"✅ SECURE Face match found: {emp_name} ({emp_id}) with high confidence")
-                        return {"status": "success", "employeeId": emp_id, "name": emp_name}
+                    print(f"Confidence gap: {confidence_gap} (preferred: >{min_confidence_gap})")
+
+                # Accept match if either gap is healthy or the best distance is very confident on its own
+                gap_confident = confidence_gap is None or confidence_gap >= min_confidence_gap
+                distance_confident = best_distance <= (security_threshold - 0.03)
+
+                if gap_confident or distance_confident:
+                    emp_id = known_ids[best_match_index]
+                    emp_name = _get_employee_name(emp_id) or "Unknown"
+                    if not gap_confident:
+                        print("⚠️ Gap below preferred minimum but distance is confident; accepting match")
+                    print(f"✅ Face match accepted: {emp_name} ({emp_id}) with distance {best_distance}")
+                    otp_result = _dispatch_face_verification_otp(emp_id, emp_name)
+                    return {
+                        "status": "success",
+                        "employeeId": emp_id,
+                        "name": emp_name,
+                        "otp": otp_result,
+                    }
                 else:
-                    # Only one face in database, accept if distance is reasonable
-                    if best_distance <= 0.6:  # More lenient for single face
-                        emp_id = known_ids[best_match_index]
-                        emp_name = _get_employee_name(emp_id) or "Unknown"
-                        print(f"✅ SECURE Face match found: {emp_name} ({emp_id}) - single face verification")
-                        return {"status": "success", "employeeId": emp_id, "name": emp_name}
-        
+                    print("Confidence gap insufficient; rejecting match for safety")
+
         print("❌ SECURITY: Face verification FAILED - No secure match found")
         print(f"Best distance was: {best_distance if 'best_distance' in locals() else 'N/A'}")
         print("Reason: Face does not meet strict security requirements")

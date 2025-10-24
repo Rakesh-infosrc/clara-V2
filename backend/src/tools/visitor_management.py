@@ -19,13 +19,8 @@ from .visitor_log_repository import (
     query_visitor_logs,
     mark_photo_captured,
 )
-from .sms_sender import send_sms_via_twilio
+from .sms_sender import send_visitor_notification_sms
 from .employee_repository import get_employee_by_name
-from .teams_sender import (
-    send_teams_message_sync,
-    GraphAuthError,
-    GraphSendError,
-)
 
 
 _s3_client = None
@@ -197,45 +192,21 @@ async def log_and_notify_visitor(
             f"{photo_status}. Logged at {timestamp}."
         )
 
-        # Try Microsoft Teams via Graph when email/UPN is available
-        if emp_email:
+        # Try SMS notification via SNS when phone is available
+        if emp_phone:
             try:
-                teams_body = (
-                    f"👋 <strong>{meeting_employee}</strong>,<br/>"
-                    f"Visitor <strong>{visitor_name}</strong> ({phone or 'no phone'}) just arrived.<br/>"
-                    f"Purpose: {purpose or 'not provided'}<br/>"
-                    f"{photo_status}<br/>"
-                    f"Logged at {timestamp}"
-                )
-                send_teams_message_sync(
-                    user_principal_name=emp_email,
-                    message=teams_body,
-                    subject=f"Visitor {visitor_name} has arrived",
-                )
-                notification_sent = True
-                notification_method = "teams"
-            except (GraphAuthError, GraphSendError) as teams_exc:
-                teams_error = str(teams_exc)
-                notification_error = f"Teams notification failed: {teams_error}"
-                print(
-                    "[Visitor] Teams notification failed",
-                    {
-                        "employee": meeting_employee,
-                        "email": emp_email,
-                        "error": teams_error,
-                    },
-                )
-
-        # Try SMS next when phone is available
-        if not notification_sent and emp_phone:
-            try:
-                result = send_sms_via_twilio(
-                    to_phone=emp_phone,
-                    message=f"Visitor Alert: {message_text}",
+                sms_result = send_visitor_notification_sms(
+                    host_phone=emp_phone,
+                    visitor_name=visitor_name,
+                    visitor_phone=phone,
+                    purpose=purpose,
+                    meeting_employee=meeting_employee,
+                    timestamp=timestamp,
+                    photo_status=photo_status,
                 )
                 notification_sent = True
                 notification_method = "sms"
-                notification_sid = result.split("SID:")[-1].strip(" )") if "SID" in result else None
+                notification_sid = sms_result
             except RuntimeError as sms_error:
                 notification_error = f"SMS notification failed: {sms_error}"
 

@@ -1,10 +1,11 @@
 // frontend\app\api\connection-details\faceApi.ts
 export async function verifyFace(imageBlob: Blob) {
+  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://127.0.0.1:8000";
   const formData = new FormData();
   formData.append("image", imageBlob, "capture.jpg");
 
   try {
-    const response = await fetch("http://localhost:8000/face_verify", {
+    const response = await fetch(`${backendBase}/flow/face_recognition`, {
       method: "POST",
       body: formData,
     });
@@ -13,9 +14,13 @@ export async function verifyFace(imageBlob: Blob) {
       throw new Error(`Server error: ${response.status}`);
     }
 
-    return await response.json(); // { status: "success", employeeId, name } OR { status: "error" }
+    return await response.json();
   } catch (error) {
-    console.error("Face verification failed:", error);
-    return { status: "error", message: "Verification request failed" };
+    console.error("Face recognition flow failed:", error);
+    return {
+      success: false,
+      verified: false,
+      message: "Verification request failed",
+    };
   }
 }

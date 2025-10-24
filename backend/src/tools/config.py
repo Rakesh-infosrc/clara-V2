@@ -18,7 +18,6 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 # File paths using proper directory structure
-ENCODING_FILE = str(DATA_DIR / "encoding.pkl")
 EMPLOYEE_CSV = str(DATA_DIR / "employee_details.csv")
 COMPANY_INFO_PDF = str(DATA_DIR / "company_info.pdf")
 VISITOR_LOG = str(DATA_DIR / "visitor_log.csv")
@@ -26,9 +25,17 @@ MANAGER_VISIT_CSV = str(DATA_DIR / "manager_visit.csv")
 VISA_PDF_TEMPLATE = os.getenv("VISA_PDF_TEMPLATE")
 
 # ---------------- AWS Configuration ----------------
+# AWS Chennai account (SNS-only). DynamoDB/S3 stay on the primary account.
+SNS_ACCESS_KEY_ID = os.getenv("CHE_AWS_ACCESS_KEY_ID", os.getenv("AWS_ACCESS_KEY_ID"))
+SNS_SECRET_ACCESS_KEY = os.getenv("CHE_AWS_SECRET_ACCESS_KEY", os.getenv("AWS_SECRET_ACCESS_KEY"))
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_REGION_ENV = os.getenv("AWS_REGION")
-AWS_REGION = AWS_REGION_ENV or "us-east-1"
+AWS_REGION = os.getenv("CHE_AWS_REGION", AWS_REGION_ENV or "us-east-1")
+AWS_SNS_SENDER_ID = os.getenv("AWS_SNS_SENDER_ID")
+AWS_SNS_SMS_TYPE = os.getenv("AWS_SNS_SMS_TYPE", "Transactional")
+SMS_DEFAULT_COUNTRY_CODE = os.getenv("CHE_SMS_DEFAULT_COUNTRY_CODE", os.getenv("SMS_DEFAULT_COUNTRY_CODE", ""))
+AWS_SNS_ENTITY_ID = os.getenv("CHE_SNS_ENTITY_ID", os.getenv("AWS_SNS_ENTITY_ID"))
+AWS_SNS_TEMPLATE_ID = os.getenv("CHE_SNS_TEMPLATE_ID", os.getenv("AWS_SNS_TEMPLATE_ID"))
 EMPLOYEE_TABLE_NAME = os.getenv("EMPLOYEE_TABLE_NAME", "zenith-hr-employees")
 EMPLOYEE_EMAIL_INDEX = os.getenv("EMPLOYEE_EMAIL_INDEX", "EmailIndex")
 EMPLOYEE_ID_INDEX = os.getenv("EMPLOYEE_ID_INDEX", "EmployeeIdIndex")
@@ -43,13 +50,11 @@ FACE_IMAGE_BUCKET = os.getenv("FACE_IMAGE_BUCKET") or FACE_S3_BUCKET
 FACE_ENCODING_S3_KEY = os.getenv("FACE_ENCODING_S3_KEY", "Pickle_file/encoding.pkl")
 FACE_IMAGE_PREFIX = os.getenv("FACE_IMAGE_PREFIX", "Employee_Images")
 FACE_IMAGE_EXTENSION = os.getenv("FACE_IMAGE_EXTENSION", "jpg")
+FACE_ENCODING_TABLE_NAME = os.getenv("FACE_ENCODING_TABLE_NAME", "clara_face_encodings")
+FACE_ENCODING_TABLE_KEY = os.getenv("FACE_ENCODING_TABLE_KEY", "FACE_ENCODINGS")
 FACE_RECOGNITION_ENABLED = os.getenv("FACE_RECOGNITION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
-TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_PHONE_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
-TWILIO_DEFAULT_COUNTRY_CODE = os.getenv("TWILIO_DEFAULT_COUNTRY_CODE", "")
 GRAPH_CLIENT_ID = os.getenv("GRAPH_CLIENT_ID") or os.getenv("GRAPH_APPLICATION_ID")
 GRAPH_CLIENT_SECRET = os.getenv("GRAPH_CLIENT_SECRET")
 GRAPH_TENANT_ID = os.getenv("GRAPH_TENANT_ID") or os.getenv("AZURE_TENANT_ID")
@@ -77,25 +82,55 @@ def get_gmail_app_password() -> str | None:
     return password or None
 
 
-def get_twilio_account_sid() -> str | None:
-    """Return Twilio Account SID for SMS delivery."""
-    return TWILIO_ACCOUNT_SID
+def get_aws_region() -> str:
+    """Return the AWS region configured for backend services."""
+    return AWS_REGION
 
 
-def get_twilio_auth_token() -> str | None:
-    """Return Twilio Auth Token for SMS delivery."""
-    return TWILIO_AUTH_TOKEN
+def get_sns_sender_id() -> str | None:
+    """Return AWS SNS Sender ID for SMS delivery, if configured."""
+    value = (AWS_SNS_SENDER_ID or "").strip()
+    return value or None
 
 
-def get_twilio_phone_number() -> str | None:
-    """Return Twilio phone number for SMS delivery."""
-    return TWILIO_PHONE_NUMBER
+def get_sns_sms_type() -> str:
+    """Return AWS SNS SMS type (Transactional or Promotional)."""
+    value = (AWS_SNS_SMS_TYPE or "Transactional").strip()
+    return value or "Transactional"
 
 
-def get_twilio_default_country_code() -> str | None:
+def get_sns_entity_id() -> str | None:
+    value = (AWS_SNS_ENTITY_ID or "").strip()
+    return value or None
+
+
+def get_sns_template_id() -> str | None:
+    value = (AWS_SNS_TEMPLATE_ID or "").strip()
+    return value or None
+
+
+def get_default_sms_country_code() -> str | None:
     """Return default country code used when normalizing SMS phone numbers."""
-    code = (TWILIO_DEFAULT_COUNTRY_CODE or "").strip()
+    code = (SMS_DEFAULT_COUNTRY_CODE or "").strip()
     return code or None
+
+
+def get_sns_region() -> str:
+    """Return region for SNS (prefers Chennai account)."""
+    region = (os.getenv("CHE_AWS_REGION") or AWS_REGION).strip()
+    return region or "us-east-1"
+
+
+def get_sns_access_key_id() -> str | None:
+    """Return access key id for SNS using Chennai account when available."""
+    value = (SNS_ACCESS_KEY_ID or "").strip()
+    return value or None
+
+
+def get_sns_secret_access_key() -> str | None:
+    """Return secret access key for SNS using Chennai account when available."""
+    value = (SNS_SECRET_ACCESS_KEY or "").strip()
+    return value or None
 
 
 def get_graph_client_id() -> str | None:

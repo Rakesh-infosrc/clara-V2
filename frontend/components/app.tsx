@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Room, RoomEvent } from 'livekit-client';
 import { motion } from 'motion/react';
 import {
@@ -15,12 +15,39 @@ import { Welcome } from '@/components/welcome';
 import type { AppConfig } from '@/lib/types';
 import VideoCapture from "@/components/VideoCapture"
 import AnimatedBackground from '@/components/animated-background';
+import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 
 const MotionWelcome = motion.create(Welcome);
 const MotionSessionView = motion.create(SessionView);
 
 interface AppProps {
   appConfig: AppConfig;
+}
+
+function FaceCaptureDock() {
+  const { send } = useChatAndTranscription();
+
+  const handleVerified = useCallback(
+    (employeeName?: string, employeeId?: string, agentMessage?: string) => {
+      const trimmedMessage = agentMessage?.trim();
+      const displayName = employeeName && employeeName.trim().length > 0 ? employeeName.trim() : 'there';
+      const safeMessage =
+        trimmedMessage && trimmedMessage.length > 0
+          ? trimmedMessage
+          : `Hello ${displayName}${employeeId ? ` (${employeeId})` : ''}, you are verified and have full access. How can I help you today?`;
+
+      send(safeMessage).catch((err) => {
+        console.error('[FaceCaptureDock] Failed to send verification message to agent:', err);
+      });
+    },
+    [send]
+  );
+
+  return (
+    <div className="absolute bottom-4 right-4 bg-blue-950 shadow-lg rounded-lg mb-34">
+      <VideoCapture onVerified={handleVerified} />
+    </div>
+  );
 }
 
 export function App({ appConfig }: AppProps) {
@@ -147,12 +174,8 @@ export function App({ appConfig }: AppProps) {
             }}
           />
 
-          {/* 👇 Add Face Recognition UI here */}
-          {sessionStarted && (
-            <div className="absolute bottom-4 right-4 bg-blue-950 shadow-lg rounded-lg mb-34">
-              <VideoCapture />
-            </div>
-          )}
+          {/* 👇 Face Recognition UI with automatic agent greeting */}
+          {sessionStarted && <FaceCaptureDock />}
         </RoomContext.Provider>
 
 

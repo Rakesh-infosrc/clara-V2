@@ -54,9 +54,9 @@ MESSAGES = {
     },
     "language_selection_confirmed": {
         "en": "Great! I'll speak in English. Are you an Employee or a Visitor?",
-        "ta": "சிறப்பு! நான் தமிழ் மொழியில் பேசுகிறேன். நீங்கள் ஊழியரா அல்லது பார்வையாளரா?",
-        "te": "గ్రేట్! నేను ఇంగ్లీష్ మాట్లాడతాను. మీరు ఉద్యోగి లేదా అతిథి?",
-        "hi": "बहुत बढ़िया! मैं हिंदी में बात करूँगी। क्या आप कर्मचारी हैं या आगंतुक?",
+        "ta": "சிறப்பு! நான் தமிழ் மொழியில் பேசுகிறேன். நீங்கள் ஊழியரா அல்லது பார்வையாளரா?\n(English) I'll speak Tamil. Are you an Employee or a Visitor?",
+        "te": "గ్రేట్! నేను తెలుగు మాట్లాడతాను. మీరు ఉద్యోగి లేదా అతిథి?\n(English) I'll speak Telugu. Are you an Employee or a Visitor?",
+        "hi": "बहुत बढ़िया! मैं हिंदी में बात करूँगी। क्या आप कर्मचारी हैं या आगंतुक?\n(English) I'll speak Hindi. Are you an Employee or a Visitor?",
     },
     "classification_employee": {
         "en": "Great! Please show your face to the camera for recognition.",
@@ -209,10 +209,10 @@ MESSAGES = {
         "hi": "ओटीपी सत्यापन विफल हुआ। कृपया नया ओटीपी माँगें या दोबारा प्रयास करें।",
     },
     "manual_otp_sent": {
-        "en": "I’ve sent an OTP via Teams. Please share it to complete verification.",
-        "ta": "Teams மூலம் OTP அனுப்பியுள்ளேன். சரிபார்ப்பை நிறைவு செய்ய அதை பகிரவும்.",
-        "te": "నేను Teams ద్వారా OTP పంపాను. వెరిఫికేషన్ పూర్తి చేయడానికి దయచేసి దాన్ని షేర్ చేయండి.",
-        "hi": "मैंने Teams पर ओटीपी भेजा है। सत्यापन पूरा करने के लिए कृपया उसे बताइए।",
+        "en": "I’ve sent an OTP to your registered phone number via SMS. Please share it to complete verification.",
+        "ta": "உங்கள் பதிவு செய்யப்பட்ட தொலைபேசி எண்ணுக்கு SMS மூலம் OTP அனுப்பியுள்ளேன். சரிபார்ப்பை நிறைவு செய்ய அதை பகிரவும்.",
+        "te": "మీ నమోదిత ఫోన్ నంబర్‌కు SMS ద్వారా OTP పంపాను. వెరిఫికేషన్ పూర్తి చేయడానికి దయచేసి దాన్ని చెప్పండి.",
+        "hi": "मैंने आपके पंजीकृत फोन नंबर पर SMS के माध्यम से ओटीपी भेजा है। सत्यापन पूरा करने के लिए कृपया उसे बताएं।",
     },
     "manual_otp_send_failed": {
         "en": "I couldn't send the OTP right now ({error}). Please try again shortly.",

@@ -185,9 +185,11 @@ def _detect_language_switch_request(text: str) -> str | None:
         for phrase in triggers:
             if phrase in lowered:
                 return lang_code
-    detected = resolve_language_code(user_input)
-    if detected != DEFAULT_LANGUAGE:
-        return detected
+    stripped = text.strip()
+    if len(stripped) >= 4 and (" " in stripped or "-" in stripped):
+        detected = resolve_language_code(stripped.lower())
+        if detected != DEFAULT_LANGUAGE:
+            return detected
     return None
 
 

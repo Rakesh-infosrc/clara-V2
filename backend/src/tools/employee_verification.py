@@ -7,17 +7,10 @@ from livekit.agents import function_tool, RunContext
 from .config import (
     otp_sessions,
     is_dev_mode_otp,
-    get_gmail_user,
-    get_gmail_app_password,
 )
 from .employee_repository import get_employee_by_email, get_employee_by_id
 from .manager_visit_repository import get_manager_visit
-from .email_sender import send_email_via_gmail
-from .teams_sender import (
-    send_teams_message_sync,
-    GraphAuthError,
-    GraphSendError,
-)
+from .sms_sender import send_sms_via_sns
 
 def _normalize_email(email: str | None) -> str:
     return (email or "").strip().lower()
@@ -78,48 +71,49 @@ def _issue_otp(email_key: str, record: dict) -> str:
     session["delivery_method"] = None
 
     emp_name = record.get("name") or "there"
-    emp_email = email_key
+    phone_number = (record.get("phone") or "").strip()
 
     delivery_method = None
     delivery_details = None
-    teams_error: str | None = None
-
-    if is_dev_mode_otp():
-        return (
-            f"✅ [DEV MODE] OTP generated for {emp_name}. "
-            f"Use this OTP to verify: {generated_otp}"
+    sms_error: str | None = None
+    dev_mode = is_dev_mode_otp()
+    if dev_mode:
+        print(
+            "[OTP] Dev mode active",
+            {
+                "employee": emp_name,
+                "employee_id": record.get("employee_id"),
+                "otp": generated_otp,
+            },
         )
 
-    # Try Microsoft Teams when an email/UPN is available
-    if emp_email:
+    # Try SMS first when phone is available
+    if phone_number:
+    
+        sms_message = (
+            f"Hello {emp_name}, your Clara verification code is {generated_otp}. "
+            "Use this OTP to complete your sign-in."
+        )
         try:
-            teams_content = (
-                f"<p>Hello {emp_name},</p>"
-                f"<p>Your one-time password is: <strong>{generated_otp}</strong></p>"
-                "<p>This code expires shortly. If you did not request it, please contact reception.</p>"
-            )
-            send_teams_message_sync(
-                user_principal_name=emp_email,
-                message=teams_content,
-                subject="Clara OTP",
-            )
-            delivery_method = "teams"
-            delivery_details = f"via Teams DM to {emp_email}"
-        except (GraphAuthError, GraphSendError) as exc:
-            teams_error = str(exc)
+            send_sms_via_sns(phone_number, sms_message)
+            delivery_method = "sms"
+            delivery_details = f"via SMS to {phone_number}"
+        except Exception as exc:
+            sms_error = str(exc)
             print(
-                "[OTP] Teams delivery failed",
+                "[OTP] SMS delivery failed",
                 {
-                    "email": emp_email,
-                    "error": teams_error,
+                    "phone": phone_number,
+                    "error": sms_error,
                 },
             )
 
     if not delivery_method:
-        failure_reason = teams_error or "Teams delivery not available."
+        failure_reason = sms_error or "No delivery channel available."
         return (
-            "❌ I couldn't send the OTP via Teams right now. "
-            f"Reason: {failure_reason}"
+            "❌ I'm unable to deliver the OTP right now. "
+            f"Reason: {failure_reason}. "
+            "Please contact reception or support to verify your identity manually."
         )
 
     session["delivery_method"] = delivery_method
@@ -129,7 +123,6 @@ def _issue_otp(email_key: str, record: dict) -> str:
         "details": delivery_details,
         "otp": generated_otp,
         "employee": emp_name,
-        "teams_error": teams_error,
     }
     print(
         f"[OTP] {delivery_method.upper()} dispatched",
@@ -140,7 +133,11 @@ def _issue_otp(email_key: str, record: dict) -> str:
             "otp": generated_otp,
         },
     )
-    return f"✅ Hi {emp_name}, I sent an OTP via {delivery_method} ({delivery_details}). Please tell me the OTP now."
+    dev_note = " (OTP logged to server console for developers.)" if dev_mode else ""
+    return (
+        f"✅ Hi {emp_name}, I sent an OTP via {delivery_method} ({delivery_details}). "
+        "Please tell me the OTP now." + dev_note
+    )
 
 
 def _manager_visit_message(emp_id: Optional[str], emp_name: str, default_message: str) -> str:
@@ -179,7 +176,7 @@ def _verify_otp(email_key: str, otp: str, record: dict) -> str:
 
     provided_otp = str(otp or "").strip()
     if not provided_otp:
-        return "❌ Please provide the OTP that was sent to your email."
+        return "❌ Please provide the OTP that was sent to your phone via SMS."
 
     saved_otp = session.get("otp")
     if saved_otp and provided_otp == saved_otp:
@@ -207,7 +204,7 @@ async def get_employee_details(
     raw_email = (email or "").strip()
     raw_employee_id = (employee_id or "").strip()
     if not raw_employee_id:
-        return "❌ Please provide your employee ID so I can fetch your registered email."
+        return "❌ Please provide your employee ID so I can fetch your registered profile."
 
     record = _load_employee_record(raw_email, raw_employee_id, fallback_name=name, fallback_employee_id=employee_id)
     if not record:
@@ -215,7 +212,7 @@ async def get_employee_details(
 
     email_key = _normalize_email(record.get("email") or raw_email)
     if not email_key:
-        return "❌ Unable to verify without a valid email address on file."
+        return "❌ Unable to verify without a valid employee record."
 
     if otp is None or not str(otp).strip():
         return _issue_otp(email_key, record)
@@ -232,7 +229,7 @@ def send_otp_sync(email: str | None, employee_id: str | None = None) -> tuple[st
     raw_email = (email or "").strip()
     raw_employee_id = (employee_id or "").strip()
     if not raw_employee_id:
-        return "❌ Please provide your employee ID so I can send the OTP to your registered email.", None
+        return "❌ Please provide your employee ID so I can send the OTP to your registered phone number.", None
 
     record = _load_employee_record(raw_email, raw_employee_id)
     if not record:
@@ -240,7 +237,7 @@ def send_otp_sync(email: str | None, employee_id: str | None = None) -> tuple[st
 
     email_key = _normalize_email(record.get("email") or raw_email)
     if not email_key:
-        return "❌ Unable to verify without a valid email address on file.", None
+        return "❌ Unable to verify without a valid employee record.", None
 
     return _issue_otp(email_key, record), record
 
@@ -259,10 +256,10 @@ def verify_otp_sync(email: str | None, otp: str | None, employee_id: str | None 
 
     email_key = _normalize_email(record.get("email") or raw_email)
     if not email_key:
-        return "❌ Unable to verify without a valid email address on file."
+        return "❌ Unable to verify without a valid employee record."
 
     provided_otp = (otp or "").strip()
     if not provided_otp:
-        return "❌ Please provide the OTP that was sent to your email."
+        return "❌ Please provide the OTP that was sent to your phone via SMS."
 
     return _verify_otp(email_key, provided_otp, record)

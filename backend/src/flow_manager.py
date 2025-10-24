@@ -264,6 +264,12 @@ class VirtualReceptionistFlow:
             session.is_verified = True
             session.current_state = FlowState.EMPLOYEE_VERIFIED
 
+            # Clear manual verification prompts if face recognition succeeded later
+            session.user_data.pop("manual_name", None)
+            session.user_data.pop("manual_employee_id", None)
+            session.user_data.pop("manual_email", None)
+            session.user_data.pop("manual_phone", None)
+
             # Update global verification state
             from agent_state import set_user_verified
             set_user_verified(emp_name, emp_id)
@@ -453,19 +459,51 @@ class VirtualReceptionistFlow:
                 return False, "Invalid session or user type", FlowState.IDLE
 
             lang = get_preferred_language()
-            trimmed_name = (name or "").strip()
-            trimmed_phone = (phone or "").strip()
-            trimmed_purpose = (purpose or "").strip()
-            trimmed_host = (host_employee or "").strip()
+            updated = False
+
+            name_candidate = (name or "").strip()
+            if name_candidate and session.user_data.get("visitor_name") != name_candidate:
+                session.user_data["visitor_name"] = name_candidate
+                updated = True
+            trimmed_name = (session.user_data.get("visitor_name") or "").strip()
+
+            phone_candidate = (phone or "").strip()
+            if phone_candidate and session.user_data.get("visitor_phone") != phone_candidate:
+                session.user_data["visitor_phone"] = phone_candidate
+                updated = True
+            trimmed_phone = (session.user_data.get("visitor_phone") or "").strip()
+
+            purpose_candidate = (purpose or "").strip()
+            if purpose_candidate and session.user_data.get("visitor_purpose") != purpose_candidate:
+                session.user_data["visitor_purpose"] = purpose_candidate
+                updated = True
+            trimmed_purpose = (session.user_data.get("visitor_purpose") or "").strip()
+
+            host_candidate = (host_employee or "").strip()
+            if host_candidate and session.user_data.get("host_employee") != host_candidate:
+                session.user_data["host_employee"] = host_candidate
+                updated = True
+            trimmed_host = (session.user_data.get("host_employee") or "").strip()
 
             if not trimmed_name:
+                if updated:
+                    self.save_sessions()
                 return False, get_message("visitor_need_name", lang), FlowState.VISITOR_INFO_COLLECTION
             if not trimmed_phone:
+                if updated:
+                    self.save_sessions()
                 return False, get_message("visitor_need_phone", lang), FlowState.VISITOR_INFO_COLLECTION
             if not trimmed_purpose:
+                if updated:
+                    self.save_sessions()
                 return False, get_message("visitor_need_purpose", lang), FlowState.VISITOR_INFO_COLLECTION
             if not trimmed_host:
+                if updated:
+                    self.save_sessions()
                 return False, get_message("visitor_need_host", lang), FlowState.VISITOR_INFO_COLLECTION
+
+            if updated:
+                self.save_sessions()
 
             session.user_data.update({
                 "visitor_name": trimmed_name,

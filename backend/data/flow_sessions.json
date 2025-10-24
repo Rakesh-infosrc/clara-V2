@@ -1,5 +1,170 @@
 {
-  "sessions": {},
-  "current_session_id": null,
-  "last_updated": 1760776976.7199504
+  "sessions": {
+    "session_1761281036085": {
+      "session_id": "session_1761281036085",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1761281036.0858662,
+      "last_activity": 1761281058.5377345,
+      "verification_attempts": 0,
+      "user_data": {
+        "employee_name": "Rakesh Reddy Bijjam",
+        "employee_id": "1307",
+        "verification_method": "face_recognition"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1761281497552": {
+      "session_id": "session_1761281497552",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1761281497.5528312,
+      "last_activity": 1761281534.8854775,
+      "verification_attempts": 0,
+      "user_data": {
+        "employee_name": "Rakesh Reddy Bijjam",
+        "employee_id": "1307",
+        "verification_method": "face_recognition"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1761281896551": {
+      "session_id": "session_1761281896551",
+      "current_state": "language_selection",
+      "user_type": "unknown",
+      "start_time": 1761281896.5513928,
+      "last_activity": 1761281896.5983064,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761282134927": {
+      "session_id": "session_1761282134927",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1761282134.9273822,
+      "last_activity": 1761282160.5441306,
+      "verification_attempts": 0,
+      "user_data": {
+        "employee_name": "Rakesh Reddy Bijjam",
+        "employee_id": "1307",
+        "verification_method": "face_recognition"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1761282706478": {
+      "session_id": "session_1761282706478",
+      "current_state": "language_selection",
+      "user_type": "unknown",
+      "start_time": 1761282706.4789429,
+      "last_activity": 1761282706.6805499,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761282897643": {
+      "session_id": "session_1761282897643",
+      "current_state": "language_selection",
+      "user_type": "unknown",
+      "start_time": 1761282897.6435933,
+      "last_activity": 1761282897.7046375,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761283016351": {
+      "session_id": "session_1761283016351",
+      "current_state": "employee_verified",
+      "user_type": "employee",
+      "start_time": 1761283016.352448,
+      "last_activity": 1761283051.4329534,
+      "verification_attempts": 0,
+      "user_data": {
+        "employee_name": "Rakesh Reddy Bijjam",
+        "employee_id": "1307",
+        "verification_method": "face_recognition"
+      },
+      "is_verified": true,
+      "verification_method": null
+    },
+    "session_1761283682763": {
+      "session_id": "session_1761283682763",
+      "current_state": "language_selection",
+      "user_type": "unknown",
+      "start_time": 1761283682.7632096,
+      "last_activity": 1761283682.7890592,
+      "verification_attempts": 0,
+      "user_data": {},
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761286112387": {
+      "session_id": "session_1761286112387",
+      "current_state": "flow_end",
+      "user_type": "visitor",
+      "start_time": 1761286112.3878515,
+      "last_activity": 1761286170.0434735,
+      "verification_attempts": 0,
+      "user_data": {
+        "visitor_name": "Ramu",
+        "visitor_phone": "9361202234",
+        "visitor_purpose": "interview",
+        "host_employee": "Rakesh",
+        "face_captured": true,
+        "face_capture_time": "2025-10-24T11:39:46.674838"
+      },
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761286697067": {
+      "session_id": "session_1761286697067",
+      "current_state": "flow_end",
+      "user_type": "visitor",
+      "start_time": 1761286697.0671875,
+      "last_activity": 1761286742.4977663,
+      "verification_attempts": 0,
+      "user_data": {
+        "visitor_name": "Ramu",
+        "visitor_phone": "unknown",
+        "visitor_purpose": "interview",
+        "host_employee": "RAkesh",
+        "face_captured": true,
+        "face_capture_time": "2025-10-24T11:49:49.695865",
+        "photo_location": "S3://clara-visitor-photos/2025_10_24/Ramu2025_10_24_114939.png",
+        "photo_storage_type": "s3",
+        "photo_filename": "Ramu2025_10_24_114939.png"
+      },
+      "is_verified": false,
+      "verification_method": null
+    },
+    "session_1761287524294": {
+      "session_id": "session_1761287524294",
+      "current_state": "flow_end",
+      "user_type": "visitor",
+      "start_time": 1761287524.294941,
+      "last_activity": 1761287685.4816384,
+      "verification_attempts": 0,
+      "user_data": {
+        "visitor_name": "Ramu",
+        "visitor_phone": "9361202234",
+        "visitor_purpose": "interview",
+        "host_employee": "rakesh",
+        "photo_location": "S3://clara-visitor-photos/2025_10_24/Ramu2025_10_24_120450.png",
+        "photo_storage_type": "s3",
+        "photo_filename": "Ramu2025_10_24_120450.png",
+        "face_captured": true,
+        "face_capture_time": "2025-10-24T12:04:59.387048"
+      },
+      "is_verified": false,
+      "verification_method": null
+    }
+  },
+  "current_session_id": "session_1761287524294",
+  "last_updated": 1761287699.3870482
 }

@@ -2,6 +2,23 @@
 
 import { useEffect, useRef, useState } from "react";
 
+interface FaceFlowResponse {
+  success: boolean;
+  message?: string;
+  next_state?: string | null;
+  face_result?: {
+    status?: string;
+    name?: string;
+    employeeId?: string;
+  };
+  flow_status?: any;
+}
+interface FaceResultPayload {
+  status?: string;
+  name?: string;
+  employeeId?: string;
+}
+
 interface VerificationState {
   status: 'scanning' | 'verified' | 'failed' | 'manual_input' | 'idle';
   message: string;
@@ -10,7 +27,11 @@ interface VerificationState {
   accessGranted: boolean;
 }
 
-export default function VideoCapture() {
+interface VideoCaptureProps {
+  onVerified?: (employeeName?: string, employeeId?: string, agentMessage?: string) => void;
+}
+
+export default function VideoCapture({ onVerified }: VideoCaptureProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const [verification, setVerification] = useState<VerificationState>({
@@ -93,17 +114,17 @@ export default function VideoCapture() {
           } else if (signal && signal.name === 'start_visitor_photo') {
             console.log('[VideoCapture] Activating visitor photo capture mode');
             setMode('visitor');
-            setScanningEnabled(true);
+            setScanningEnabled(false);
             setVerification({
               status: 'idle',
-              message: 'Visitor photo capture enabled - ready to snap',
+              message: signal.payload?.message || 'Capturing visitor photo...',
               accessGranted: false
             });
             // Clear the signal after processing
             console.log('[VideoCapture] Clearing processed start_visitor_photo signal');
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
             setTimeout(() => {
-              scanFace(true);
+              captureVisitorPhoto(true, signal.payload?.message);
             }, 500);
           }
         }
@@ -136,11 +157,114 @@ export default function VideoCapture() {
         clearInterval(scanIntervalRef.current);
       }
     };
-  }, [verification.status, scanningEnabled]);
+  }, [verification.status, scanningEnabled, mode]);
+
+  const captureVisitorPhoto = async (autoCapture: boolean = false, overrideMessage?: string) => {
+    if (!autoCapture && mode !== 'visitor') return;
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    const stream = (video.srcObject as MediaStream | null);
+    const track = stream?.getVideoTracks?.()[0];
+    const isLive = !!track && track.readyState === 'live' && video.videoWidth > 0;
+    if (!isLive) {
+      console.warn('[VideoCapture] Camera feed not live for visitor capture.');
+      setVerification({
+        status: 'failed',
+        message: 'Camera feed not available. Please turn your camera on.',
+        accessGranted: false,
+      });
+      if (track && track.readyState !== 'live') {
+        track.stop();
+      }
+      return;
+    }
+
+    setVerification(prev => ({
+      ...prev,
+      status: 'scanning',
+      message: overrideMessage && overrideMessage.trim().length > 0
+        ? overrideMessage
+        : (autoCapture ? 'Capturing visitor photo...' : 'Capturing photo...'),
+    }));
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setVerification({ status: 'failed', message: 'Unable to capture photo.', accessGranted: false });
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('image', blob, 'visitor.jpg');
+        const submittedName = (visitorName || vName).trim();
+        if (submittedName) {
+          formData.append('visitor_name', submittedName);
+        }
+
+        try {
+          const res = await fetch(`${backendBase}/flow/visitor_photo`, {
+            method: 'POST',
+            body: formData,
+          });
+          let data: FaceFlowResponse | any = {};
+          try {
+            data = await res.json();
+          } catch (e) {
+            // ignore JSON parse errors
+          }
+
+          if (!res.ok) {
+            console.error('[VideoCapture] Visitor photo capture failed:', res.status, data);
+            throw new Error(data?.message || res.statusText);
+          }
+
+          if (data.success) {
+            setVerification({
+              status: 'verified',
+              message: data.message || '✅ Visitor photo captured',
+              accessGranted: false,
+            });
+          } else {
+            setVerification({ status: 'failed', message: data.message || 'Visitor photo failed', accessGranted: false });
+          }
+        } catch (err) {
+          console.error('[VideoCapture] Visitor photo error:', err);
+          setVerification({
+            status: 'failed',
+            message: (err as Error)?.message || 'Network error',
+            accessGranted: false,
+          });
+        }
+      }, 'image/jpeg');
+    } catch (error) {
+      console.error('[VideoCapture] captureVisitorPhoto unexpected error:', error);
+      setVerification({
+        status: 'failed',
+        message: 'Capture failed',
+        accessGranted: false,
+      });
+    }
+  };
 
   // Face scanning function
   const scanFace = async (force: boolean = false) => {
     console.log('[VideoCapture] scanFace invoked. Mode:', mode, 'Status:', verification.status, 'Scanning enabled:', scanningEnabled);
+    const isVisitorMode = mode === 'visitor';
+    if (isVisitorMode) {
+      if (force) {
+        await captureVisitorPhoto(true);
+      }
+      return;
+    }
+
     const video = videoRef.current;
     if (!video || (!scanningEnabled && !force) || verification.status === 'verified') return;
 
@@ -176,18 +300,15 @@ export default function VideoCapture() {
         if (!blob) return;
         const formData = new FormData();
         formData.append("image", blob, "frame.jpg");
-        if (mode === 'visitor' && visitorName.trim()) {
-          formData.append('visitor_name', visitorName.trim());
-        }
 
         try {
-          const endpoint = mode === 'visitor' ? `${backendBase}/flow/visitor_photo` : `${backendBase}/face_verify`;
+          const endpoint = isVisitorMode ? `${backendBase}/flow/visitor_photo` : `${backendBase}/flow/face_recognition`;
           console.log('[VideoCapture] Submitting frame to endpoint:', endpoint);
           const res = await fetch(endpoint, {
             method: "POST",
             body: formData,
           });
-          let data: any = {};
+          let data: FaceFlowResponse | (any) = {};
           try {
             data = await res.json();
           } catch (e) {
@@ -199,32 +320,39 @@ export default function VideoCapture() {
           }
           console.log('[VideoCapture] Scan result:', data);
 
-          if (mode === 'visitor') {
-            if (data.success) {
-              setVerification({
-                status: 'verified',
-                message: data.message || '✅ Visitor photo captured',
-                accessGranted: false
-              });
-              setScanningEnabled(false);
-              // Alert removed - no popup for visitor photo capture
-            } else {
-              setVerification({ status: 'failed', message: data.message || 'Visitor photo failed', accessGranted: false });
-            }
-            return;
-          }
-
-          if (data.success && data.verified) {
+          if (data.success && data.face_result?.status === 'success') {
+            const payload: FaceResultPayload = data.face_result || {};
+            const empNameRaw = data.face_result?.name || data.face_result?.employeeName;
+            const empName = empNameRaw && empNameRaw.trim().length > 0 ? empNameRaw.trim() : undefined;
+            const empId = data.face_result?.employeeId;
+            const now = new Date();
+            const formattedTime = new Intl.DateTimeFormat(undefined, {
+              hour: 'numeric',
+              minute: '2-digit',
+            }).format(now);
+            const greetingName = empName || 'there';
+            const successMessage = `${formattedTime} I'm glad to see you, ${greetingName}${empId ? ` (${empId})` : ''}.`;
+            const displayMessage = 'Face verified successfully.';
             setVerification({
               status: 'verified',
-              message: data.message || `✅ Face recognized. Welcome ${data.employeeName}${data.employeeId ? ` (${data.employeeId})` : ''}!`,
+              message: displayMessage,
               accessGranted: true,
-              employeeName: data.employeeName,
-              employeeId: data.employeeId
+              employeeName: empName || empNameRaw,
+              employeeId: empId
             });
-            
-            // Show success alert
-            alert(`🎉 ${data.message || `Welcome ${data.employeeName}${data.employeeId ? ` (${data.employeeId})` : ''}!`}`);
+            setScanningEnabled(false);
+
+            try {
+              await fetch(`${backendBase}/post_signal`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: 'stop_face_capture' }),
+              });
+            } catch (stopErr) {
+              console.log('[VideoCapture] Failed to post stop signal:', stopErr);
+            }
+
+            onVerified?.(empName || empNameRaw, empId, successMessage);
           } else {
             console.warn('[VideoCapture] Face not recognized. Response payload:', data);
             setVerification({
@@ -255,8 +383,7 @@ export default function VideoCapture() {
   // Manual capture for visitor mode
   const captureVisitorNow = async () => {
     if (mode !== 'visitor') return;
-    // Temporarily trigger a scan once
-    await scanFace(true);
+    await captureVisitorPhoto();
   };
 
   // Manual mode selection helpers
@@ -423,6 +550,9 @@ export default function VideoCapture() {
                       setVisitorName(vName);
                       setShowVisitorInfoForm(false);
                       setVerification({ status: 'idle', message: 'Info submitted. Preparing photo capture...', accessGranted: false });
+                      setTimeout(() => {
+                        captureVisitorPhoto(true, data?.next_prompt || data?.message);
+                      }, 800);
                       // The backend will signal start_visitor_photo next; our polling will enable scanning
                     } catch (e: any) {
                       alert(`Failed to submit info: ${e?.message || e}`);

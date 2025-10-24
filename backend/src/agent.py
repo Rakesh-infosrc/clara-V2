@@ -2,6 +2,35 @@ def _sanitize_response_text(text: str) -> str:
     if not text:
         return text
 
+    lang = get_preferred_language()
+    lowered = text.lower()
+    replacements = (
+        ("i am sorry, i am not able to understand", "language_support_affirm"),
+        ("i only speak english", "language_support_affirm"),
+        ("could you please speak in english", "language_support_affirm"),
+        ("i am currently limited to english", "language_support_affirm"),
+        ("prefer to speak in tamil", "language_support_affirm"),
+        ("prefer to speak in telugu", "language_support_affirm"),
+        ("prefer to speak in hindi", "language_support_affirm"),
+        ("prefer to speak in english", "language_support_affirm"),
+        ("i understand you prefer to speak", "language_support_affirm"),
+        ("what do you want to search for", "search_prompt"),
+        ("what would you like me to search for", "search_prompt"),
+    )
+    for phrase, message_key in replacements:
+        if phrase in lowered:
+            return get_message(message_key, lang)
+    if "i am sorry" in lowered and (
+        "don't support" in lowered
+        or "do not support" in lowered
+        or "don't speak" in lowered
+        or "do not speak" in lowered
+        or "cannot speak" in lowered
+        or "can't speak" in lowered
+    ):
+        return get_message("language_support_affirm", lang)
+    return text
+
 
 def _get_state_fallback(session, lang: str, include_default: bool = True) -> str | None:
     fallback_by_state = {
@@ -419,7 +448,7 @@ STATE MANAGEMENT:
             instructions=clara_instructions,
             llm=google.beta.realtime.RealtimeModel(
                 voice="Aoede",
-                temperature=0.7,
+                temperature=0.3,
             ),
             tools=tool_list,
         )
