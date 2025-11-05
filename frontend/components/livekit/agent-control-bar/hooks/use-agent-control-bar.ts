@@ -8,9 +8,6 @@ import {
   useTrackToggle,
 } from '@livekit/components-react';
 import { usePublishPermissions } from './use-publish-permissions';
-import { useEffect, useRef } from 'react';
-import { useLocalCameraTrack } from '@livekit/components-react';
-
 
 export interface ControlBarControls {
   microphone?: boolean;
@@ -60,6 +57,10 @@ export function useAgentControlBar(props: UseAgentControlBarProps = {}): UseAgen
     onDeviceError: (error) => props.onDeviceError?.({ source: Track.Source.ScreenShare, error }),
   });
 
+  const { enabled: microphoneEnabled, toggle: toggleMicrophoneNative } = microphoneToggle;
+  const { enabled: cameraEnabled, toggle: toggleCameraNative } = cameraToggle;
+  const { enabled: screenShareEnabled, toggle: toggleScreenShareNative } = screenShareToggle;
+
   const micTrackRef = React.useMemo(() => {
     return {
       participant: localParticipant,
@@ -104,33 +105,37 @@ export function useAgentControlBar(props: UseAgentControlBarProps = {}): UseAgen
 
   const handleToggleCamera = React.useCallback(
     async (enabled?: boolean) => {
-      if (screenShareToggle.enabled) {
-        screenShareToggle.toggle(false);
+      if (screenShareEnabled) {
+        await toggleScreenShareNative(false);
       }
-      await cameraToggle.toggle(enabled);
-      // persist video input enabled preference
-      saveVideoInputEnabled(!cameraToggle.enabled);
+      await toggleCameraNative(enabled);
+      saveVideoInputEnabled(!cameraEnabled);
     },
-    [cameraToggle.enabled, screenShareToggle.enabled]
+    [
+      cameraEnabled,
+      saveVideoInputEnabled,
+      screenShareEnabled,
+      toggleCameraNative,
+      toggleScreenShareNative,
+    ]
   );
 
   const handleToggleMicrophone = React.useCallback(
     async (enabled?: boolean) => {
-      await microphoneToggle.toggle(enabled);
-      // persist audio input enabled preference
-      saveAudioInputEnabled(!microphoneToggle.enabled);
+      await toggleMicrophoneNative(enabled);
+      saveAudioInputEnabled(!microphoneEnabled);
     },
-    [microphoneToggle.enabled]
+    [microphoneEnabled, saveAudioInputEnabled, toggleMicrophoneNative]
   );
 
   const handleToggleScreenShare = React.useCallback(
     async (enabled?: boolean) => {
-      if (cameraToggle.enabled) {
-        cameraToggle.toggle(false);
+      if (cameraEnabled) {
+        await toggleCameraNative(false);
       }
-      await screenShareToggle.toggle(enabled);
+      await toggleScreenShareNative(enabled);
     },
-    [screenShareToggle.enabled, cameraToggle.enabled]
+    [cameraEnabled, toggleCameraNative, toggleScreenShareNative]
   );
 
   return {

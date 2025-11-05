@@ -9,6 +9,10 @@ import type { AppConfig, SandboxConfig } from './types';
 export const CONFIG_ENDPOINT = process.env.NEXT_PUBLIC_APP_CONFIG_ENDPOINT;
 export const SANDBOX_ID = process.env.SANDBOX_ID;
 
+export const BACKEND_BASE_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  'http://clara-alb-dev-926087638.us-east-1.elb.amazonaws.com';
+
 export const THEME_STORAGE_KEY = 'theme-mode';
 export const THEME_MEDIA_QUERY = '(prefers-color-scheme: dark)';
 

@@ -20,6 +20,7 @@ from language_utils import (
     resolve_language_code,
     SUPPORTED_LANGUAGES,
     normalize_transcript,
+    detect_language_from_text,
 )
 from tools.config import is_face_recognition_enabled
 from agent_state import get_preferred_language, set_preferred_language
@@ -122,13 +123,100 @@ class VirtualReceptionistFlow:
         """Process user type classification"""
         session = self.get_current_session()
         if not session:
-            lang = get_preferred_language()
-            return False, get_message("manual_no_session", lang), FlowState.IDLE
+            # Create a new session if none exists
+            print("[Flow] No session found, creating new session for classification")
+            session_id = self.create_session()
+            session = self.get_current_session()
+            if not session:
+                lang = get_preferred_language()
+                return False, get_message("manual_no_session", lang), FlowState.IDLE
 
         lang = get_preferred_language()
         user_input_clean = user_input.strip()
         user_input_normalized = normalize_transcript(user_input_clean, lang)
         user_input_lower = user_input_normalized.lower()
+        
+        print(f"[Flow] Processing classification - Current state: {session.current_state.value}, Input: '{user_input_lower}'")
+
+        # Check for employee/visitor keywords first, regardless of current state
+        # This allows users to skip language selection if they directly say "I'm an employee"
+        employee_keywords = [
+            'employee', 'staff', 'worker', 'work here', 'i am an employee', 
+            'am an employee', 'i work here', 'am a employee', 'i am a employee',
+            'ஊழியர்', 'ஊழியன', 'ஊழியர்கள்',
+            'ఉద్యోగి', 'సిబ్బంది',
+            'कर्मचारी', 'स्टाफ'
+        ]
+        visitor_keywords = [
+            'visitor', 'guest', 'visiting', 'meeting',
+            'வருகையாளர்', 'விருந்தினர்', 'வருகை',
+            'సందర్శకుడు', 'అతిథి',
+            'आगंतुक', 'मेहमान'
+        ]
+        
+        # Check if user is directly stating they're an employee or visitor
+        is_employee_intent = any(word in user_input_lower for word in employee_keywords)
+        is_visitor_intent = any(word in user_input_lower for word in visitor_keywords)
+
+        # Allow users to clarify or change their preferred language even after reaching
+        # the classification step (e.g., "I am saying Telugu"). Only treat the input as a
+        # language switch when no employee/visitor intent is detected to avoid interrupting
+        # the normal flow.
+        language_switch = detect_language_from_text(user_input_lower)
+        if (
+            language_switch in SUPPORTED_LANGUAGES
+            and language_switch != lang
+            and not is_employee_intent
+            and not is_visitor_intent
+        ):
+            print(f"[Flow] Language switch detected during classification: {language_switch}")
+            set_preferred_language(language_switch)
+            session.current_state = FlowState.USER_CLASSIFICATION
+            session.last_activity = time.time()
+            self.save_sessions()
+
+            response = get_message("language_selection_confirmed", language_switch)
+            print(f"[Flow] Language re-confirmed ({language_switch}): '{response}'")
+            return True, response, FlowState.USER_CLASSIFICATION
+        
+        if is_employee_intent:
+            print(f"🎯 [Flow] Employee intent detected directly: '{user_input_lower}'")
+            session.user_type = UserType.EMPLOYEE
+            session.current_state = FlowState.FACE_RECOGNITION
+            session.last_activity = time.time()
+            response = get_message("classification_employee", lang)
+            # Signal frontend to start face capture
+            try:
+                from flow_signal import post_signal
+                print(f"🚀 Posting start_face_capture signal for employee classification")
+                post_signal("start_face_capture", {
+                    "message": response,
+                    "next_endpoint": "/flow/face_recognition"
+                })
+                print(f"✅ Successfully posted start_face_capture signal")
+            except Exception as e:
+                print(f"❌ Warning: could not post start_face_capture signal: {e}")
+            self.save_sessions()
+            print(f"[Flow] Classified as EMPLOYEE ({lang}): '{response}'")
+            return True, response, FlowState.FACE_RECOGNITION
+        
+        if is_visitor_intent:
+            print(f"🎯 [Flow] Visitor intent detected directly: '{user_input_lower}'")
+            session.user_type = UserType.VISITOR
+            session.current_state = FlowState.VISITOR_INFO_COLLECTION
+            session.last_activity = time.time()
+            response = get_message("classification_visitor", lang)
+            try:
+                from flow_signal import post_signal
+                post_signal("start_visitor_info", {
+                    "message": response,
+                    "next_endpoint": "/flow/visitor_info"
+                })
+            except Exception as e:
+                print(f"Warning: could not post start_visitor_info signal: {e}")
+            self.save_sessions()
+            print(f"[Flow] Classified as VISITOR ({lang}): '{response}'")
+            return True, response, FlowState.VISITOR_INFO_COLLECTION
 
         if session.current_state == FlowState.LANGUAGE_SELECTION:
             lang_choice = resolve_language_code(user_input_lower)
@@ -145,54 +233,6 @@ class VirtualReceptionistFlow:
             response = get_message("language_selection_confirmed", lang_choice)
             print(f"[Flow] Language selected ({lang_choice}): '{response}'")
             return True, response, FlowState.USER_CLASSIFICATION
-
-        employee_keywords = [
-            'employee', 'staff', 'worker', 'work here',
-            'ஊழியர்', 'ஊழியன', 'ஊழியர்கள்',
-            'ఉద్యోగి', 'సిబ్బంది',
-            'कर्मचारी', 'स्टाफ'
-        ]
-        if any(word in user_input_lower for word in employee_keywords):
-            session.user_type = UserType.EMPLOYEE
-            session.current_state = FlowState.FACE_RECOGNITION
-            session.last_activity = time.time()
-            response = get_message("classification_employee", lang)
-            # Signal frontend to start face capture after employee classification
-            try:
-                from flow_signal import post_signal
-                post_signal("start_face_capture", {
-                    "message": response,
-                    "next_endpoint": "/flow/face_recognition"
-                })
-            except Exception as e:
-                print(f"Warning: could not post start_face_capture signal: {e}")
-            self.save_sessions()
-            print(f"[Flow] Classified as EMPLOYEE ({lang}): '{response}'")
-            return True, response, FlowState.FACE_RECOGNITION
-
-        visitor_keywords = [
-            'visitor', 'guest', 'visiting', 'meeting',
-            'வருகையாளர்', 'விருந்தினர்', 'வருகை',
-            'సందర్శకుడు', 'అతిథి',
-            'आगंतुक', 'मेहमान'
-        ]
-        if any(word in user_input_lower for word in visitor_keywords):
-            session.user_type = UserType.VISITOR
-            session.current_state = FlowState.VISITOR_INFO_COLLECTION
-            session.last_activity = time.time()
-            response = get_message("classification_visitor", lang)
-            # Ask frontend to collect visitor info first
-            try:
-                from flow_signal import post_signal
-                post_signal("start_visitor_info", {
-                    "message": response,
-                    "next_endpoint": "/flow/visitor_info"
-                })
-            except Exception as e:
-                print(f"Warning: could not post start_visitor_info signal on classification: {e}")
-            self.save_sessions()
-            print(f"[Flow] Classified as VISITOR ({lang}): '{response}'")
-            return True, response, FlowState.VISITOR_INFO_COLLECTION
 
         # If unclear, ask for clarification
         response = get_message("classification_retry", lang)
@@ -276,7 +316,54 @@ class VirtualReceptionistFlow:
 
             self.save_sessions()
             lang = get_preferred_language()
-            return True, get_message("face_recognition_success", lang, name=emp_name), FlowState.EMPLOYEE_VERIFIED
+            
+            # Check for manager visit and provide personalized greeting
+            from tools.manager_visit_repository import get_manager_visit
+            from datetime import datetime
+            # Use zero-padded date format to match DynamoDB partition keys (e.g., "2025-11-03")
+            today = datetime.now().strftime("%Y-%m-%d")
+            visit_record = get_manager_visit(emp_id, today)
+            
+            visit_context_line = None
+            office = "our"
+
+            if visit_record:
+                office = visit_record.get("office") or visit_record.get("Office") or "our"
+                manager_name = visit_record.get("manager_name") or visit_record.get("ManagerName")
+                notes = visit_record.get("notes") or visit_record.get("Notes")
+                visit_date_str = str(visit_record.get("visit_date") or today)
+
+                try:
+                    parsed_visit_date = datetime.strptime(visit_date_str, "%Y-%m-%d")
+                    visit_date_human = parsed_visit_date.strftime("%B %d").lower()
+                except ValueError:
+                    visit_date_human = "today"
+
+                if manager_name and notes:
+                    visit_context_line = (
+                        f"You have {notes.lower()} with {manager_name} at our {office} office {visit_date_human}."
+                    )
+                elif manager_name:
+                    visit_context_line = f"You're scheduled to meet {manager_name} at our {office} office {visit_date_human}."
+                elif notes:
+                    visit_context_line = f"Your agenda for {visit_date_human} at our {office} office is {notes.lower()}."
+                else:
+                    visit_context_line = f"Welcome back to our {office} office {visit_date_human}."
+
+            greeting_parts = [get_message("face_recognition_success", lang, name=emp_name)]
+            if visit_context_line:
+                greeting_parts.append(visit_context_line)
+
+            office_segment = "our" if office == "our" else f"our {office}"
+            greeting_parts.extend(
+                [
+                    f"Hope you had a smooth and comfortable journey. It was wonderful having you at {office_segment} office.",
+                    "We truly hope your visit was both memorable and meaningful.",
+                    "Thanks so much for taking the time to be with us."
+                ]
+            )
+
+            return True, "\n".join(greeting_parts), FlowState.EMPLOYEE_VERIFIED
         else:
             # Face not matched - proceed to manual verification
             session.current_state = FlowState.MANUAL_VERIFICATION
@@ -511,6 +598,29 @@ class VirtualReceptionistFlow:
                 "visitor_purpose": trimmed_purpose,
                 "host_employee": trimmed_host
             })
+
+            if not session.user_data.get("visitor_logged"):
+                try:
+                    from tools.visitor_management import log_and_notify_visitor
+
+                    log_message = await log_and_notify_visitor(
+                        None,
+                        trimmed_name,
+                        trimmed_phone,
+                        trimmed_purpose,
+                        trimmed_host,
+                        False,
+                        None,
+                    )
+                    session.user_data["visitor_logged"] = True
+                    session.user_data["visitor_log_result"] = log_message
+                    print(f"[Flow] Visitor log persisted: {log_message}")
+                except Exception as log_error:
+                    session.user_data["visitor_log_error"] = str(log_error)
+                    print(f"[Flow] ERROR logging visitor: {log_error}")
+                finally:
+                    self.save_sessions()
+
             session.current_state = FlowState.HOST_NOTIFICATION
             session.last_activity = time.time()
             self.save_sessions()
@@ -545,7 +655,13 @@ class VirtualReceptionistFlow:
         """Process visitor face capture"""
         session = self.get_current_session()
         if not session or session.user_type != UserType.VISITOR:
-            return False, "Invalid session or user type", FlowState.IDLE
+            # Try to recover the most recent visitor session (e.g. if current_session_id shifted)
+            visitor_sessions = [s for s in self.sessions.values() if s.user_type == UserType.VISITOR]
+            if visitor_sessions:
+                session = max(visitor_sessions, key=lambda s: s.last_activity)
+                self.current_session_id = session.session_id
+            else:
+                return False, "Invalid session or user type", FlowState.IDLE
 
         if captured:
             session.user_data["face_captured"] = True
@@ -574,10 +690,17 @@ class VirtualReceptionistFlow:
     def end_session(self) -> str:
         """End the current session"""
         session = self.get_current_session()
+        message = "Thank you! Session completed. Say 'Hey Clara' if you need more assistance."
+
         if session:
             session.current_state = FlowState.FLOW_END
-        
-        return "Thank you! Session completed. Say 'Hey Clara' if you need more assistance."
+            session.last_activity = time.time()
+            # Remove the session so a fresh call can start immediately
+            self.sessions.pop(session.session_id, None)
+            self.current_session_id = None
+            self.save_sessions()
+
+        return message
     
     def cleanup_old_sessions(self, max_age_hours: int = 2):
         """Clean up old sessions"""

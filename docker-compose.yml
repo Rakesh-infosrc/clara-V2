@@ -1,0 +1,55 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clara-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/data:/app/data
+    networks:
+      - clara-network
+
+  agent-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: clara-agent
+    command: ["python", "main.py", "start"]
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/src:/app/src:ro
+      - ./backend/data:/app/data
+    depends_on:
+      - backend
+    networks:
+      - clara-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: clara-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_CONN_DETAILS_ENDPOINT=http://backend:8000/token
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+    volumes:
+      - ./backend/data:/app/backend-data:ro
+    depends_on:
+      - backend
+    networks:
+      - clara-network
+
+networks:
+  clara-network:
+    driver: bridge

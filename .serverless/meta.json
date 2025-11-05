@@ -1,0 +1,328 @@
+{
+  "D:\\learn\\POC\\Vitural_receptionist_with_ui\\clara-V2-add-Languages\\serverless.yml": {
+    "versionFramework": "4.22.0",
+    "servicePath": "D:\\learn\\POC\\Vitural_receptionist_with_ui\\clara-V2-add-Languages\\serverless.yml",
+    "serviceConfigFileName": "serverless.yml",
+    "service": {
+      "AWSTemplateFormatVersion": "2010-09-09",
+      "Description": "Clara Virtual Receptionist ECS Stack",
+      "Parameters": {
+        "Stage": {
+          "Type": "String",
+          "Default": "dev",
+          "AllowedValues": [
+            "dev",
+            "prod"
+          ],
+          "Description": "Deployment stage"
+        },
+        "VpcId": {
+          "Type": "AWS::EC2::VPC::Id",
+          "Description": "Existing VPC ID for ECS services"
+        },
+        "PublicSubnets": {
+          "Type": "List<AWS::EC2::Subnet::Id>",
+          "Description": "Comma-separated list of public subnet IDs"
+        },
+        "PrivateSubnets": {
+          "Type": "List<AWS::EC2::Subnet::Id>",
+          "Description": "Comma-separated list of private subnet IDs for ECS tasks"
+        },
+        "ClaraBackendImage": {
+          "Type": "String",
+          "Default": "339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-backend",
+          "Description": "ECR image URI for the Clara backend service"
+        },
+        "ClaraAgentImage": {
+          "Type": "String",
+          "Default": "339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-agent-worker",
+          "Description": "ECR image URI for the Clara agent worker"
+        },
+        "ClaraFrontendImage": {
+          "Type": "String",
+          "Default": "339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-frontend",
+          "Description": "ECR image URI for the Clara frontend service"
+        },
+        "ContainerPort": {
+          "Type": "Number",
+          "Default": 8000,
+          "Description": "Backend container port exposed to the ALB"
+        },
+        "DesiredCount": {
+          "Type": "Number",
+          "Default": 1,
+          "Description": "Number of tasks to run for the backend service"
+        }
+      },
+      "Resources": {
+        "ClaraCluster": {
+          "Type": "AWS::ECS::Cluster",
+          "Properties": {
+            "ClusterName": {
+              "Fn::Sub": "infoservices-clara-${Stage}"
+            }
+          }
+        },
+        "ClaraBackendTaskExecutionRole": {
+          "Type": "AWS::IAM::Role",
+          "Properties": {
+            "AssumeRolePolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "Service": "ecs-tasks.amazonaws.com"
+                  },
+                  "Action": "sts:AssumeRole"
+                }
+              ]
+            },
+            "ManagedPolicyArns": [
+              "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+            ]
+          }
+        },
+        "ClaraBackendLogGroup": {
+          "Type": "AWS::Logs::LogGroup",
+          "Properties": {
+            "LogGroupName": {
+              "Fn::Sub": "/ecs/infoservices-clara-backend-${Stage}"
+            },
+            "RetentionInDays": 14
+          }
+        },
+        "ClaraBackendTaskDefinition": {
+          "Type": "AWS::ECS::TaskDefinition",
+          "Properties": {
+            "Family": {
+              "Fn::Sub": "infoservices-clara-backend-${Stage}"
+            },
+            "RequiresCompatibilities": [
+              "FARGATE"
+            ],
+            "NetworkMode": "awsvpc",
+            "Cpu": "512",
+            "Memory": "1024",
+            "ExecutionRoleArn": {
+              "Fn::GetAtt": [
+                "ClaraBackendTaskExecutionRole",
+                "Arn"
+              ]
+            },
+            "ContainerDefinitions": [
+              {
+                "Name": "clara-backend",
+                "Image": {
+                  "Ref": "ClaraBackendImage"
+                },
+                "PortMappings": [
+                  {
+                    "ContainerPort": {
+                      "Ref": "ContainerPort"
+                    }
+                  }
+                ],
+                "LogConfiguration": {
+                  "LogDriver": "awslogs",
+                  "Options": {
+                    "awslogs-group": {
+                      "Ref": "ClaraBackendLogGroup"
+                    },
+                    "awslogs-region": {
+                      "Ref": "AWS::Region"
+                    },
+                    "awslogs-stream-prefix": "ecs"
+                  }
+                },
+                "Environment": [
+                  {
+                    "Name": "STAGE",
+                    "Value": {
+                      "Ref": "Stage"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "ClaraBackendSecurityGroup": {
+          "Type": "AWS::EC2::SecurityGroup",
+          "Properties": {
+            "GroupDescription": "Allow ALB to reach ECS tasks",
+            "VpcId": {
+              "Ref": "VpcId"
+            }
+          }
+        },
+        "ClaraAlbSecurityGroup": {
+          "Type": "AWS::EC2::SecurityGroup",
+          "Properties": {
+            "GroupDescription": "Allow inbound HTTP traffic",
+            "VpcId": {
+              "Ref": "VpcId"
+            },
+            "SecurityGroupIngress": [
+              {
+                "IpProtocol": "tcp",
+                "FromPort": 80,
+                "ToPort": 80,
+                "CidrIp": "0.0.0.0/0"
+              }
+            ]
+          }
+        },
+        "ClaraAlb": {
+          "Type": "AWS::ElasticLoadBalancingV2::LoadBalancer",
+          "Properties": {
+            "Name": {
+              "Fn::Sub": "infoservices-clara-alb-${Stage}"
+            },
+            "Scheme": "internet-facing",
+            "Type": "application",
+            "Subnets": {
+              "Ref": "PublicSubnets"
+            },
+            "SecurityGroups": [
+              {
+                "Ref": "ClaraAlbSecurityGroup"
+              }
+            ]
+          }
+        },
+        "ClaraAlbTargetGroup": {
+          "Type": "AWS::ElasticLoadBalancingV2::TargetGroup",
+          "Properties": {
+            "Name": {
+              "Fn::Sub": "infoservices-clara-tg-${Stage}"
+            },
+            "Port": {
+              "Ref": "ContainerPort"
+            },
+            "Protocol": "HTTP",
+            "VpcId": {
+              "Ref": "VpcId"
+            },
+            "TargetType": "ip",
+            "HealthCheckPath": "/health"
+          }
+        },
+        "ClaraAlbListener": {
+          "Type": "AWS::ElasticLoadBalancingV2::Listener",
+          "Properties": {
+            "LoadBalancerArn": {
+              "Ref": "ClaraAlb"
+            },
+            "Port": 80,
+            "Protocol": "HTTP",
+            "DefaultActions": [
+              {
+                "Type": "forward",
+                "TargetGroupArn": {
+                  "Ref": "ClaraAlbTargetGroup"
+                }
+              }
+            ]
+          }
+        },
+        "ClaraBackendService": {
+          "Type": "AWS::ECS::Service",
+          "DependsOn": [
+            "ClaraAlbListener"
+          ],
+          "Properties": {
+            "ServiceName": {
+              "Fn::Sub": "infoservices-clara-backend-${Stage}"
+            },
+            "Cluster": {
+              "Ref": "ClaraCluster"
+            },
+            "DeploymentConfiguration": {
+              "MaximumPercent": 200,
+              "MinimumHealthyPercent": 50
+            },
+            "DesiredCount": {
+              "Ref": "DesiredCount"
+            },
+            "LaunchType": "FARGATE",
+            "TaskDefinition": {
+              "Ref": "ClaraBackendTaskDefinition"
+            },
+            "NetworkConfiguration": {
+              "AwsvpcConfiguration": {
+                "AssignPublicIp": "DISABLED",
+                "Subnets": {
+                  "Ref": "PrivateSubnets"
+                },
+                "SecurityGroups": [
+                  {
+                    "Ref": "ClaraBackendSecurityGroup"
+                  }
+                ]
+              }
+            },
+            "LoadBalancers": [
+              {
+                "ContainerName": "clara-backend",
+                "ContainerPort": {
+                  "Ref": "ContainerPort"
+                },
+                "TargetGroupArn": {
+                  "Ref": "ClaraAlbTargetGroup"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "Outputs": {
+        "BackendEndpoint": {
+          "Description": "Public URL for the Clara backend",
+          "Value": {
+            "Fn::Sub": "http://${ClaraAlb.DNSName}"
+          }
+        }
+      },
+      "provider": {
+        "name": "aws",
+        "stage": "dev"
+      }
+    },
+    "provider": {
+      "name": "aws",
+      "stage": "dev"
+    },
+    "dashboard": {
+      "isEnabledForService": false,
+      "requiredAuthentication": false,
+      "orgFeaturesInUse": null,
+      "orgObservabilityIntegrations": null,
+      "serviceAppId": null,
+      "serviceProvider": null,
+      "instanceParameters": null
+    },
+    "error": {
+      "message": "\"service\" property is missing in serverless",
+      "stack": "ServerlessError2: \"service\" property is missing in serverless\n    at Service.loadServiceFileParam (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1324:9312)\n    at Service.load (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1324:6842)\n    at Serverless.init (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1330:9809)\n    at runFramework (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1357:856)\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async TraditionalRunner.run (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1353:28331)\n    at async route (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1528:2878)\n    at async Object.run (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1529:3755)\n    at async run2 (file:///C:/Users/Rakesh/.serverless/releases/4.22.0/package/dist/sf-core.js:1529:4909)",
+      "code": "SERVICE_NAME_MISSING"
+    },
+    "serviceRawFile": "AWSTemplateFormatVersion: '2010-09-09'\nDescription: Clara Virtual Receptionist ECS Stack\n\nParameters:\n  Stage:\n    Type: String\n    Default: dev\n    AllowedValues:\n      - dev\n      - prod\n    Description: Deployment stage\n\n  VpcId:\n    Type: AWS::EC2::VPC::Id\n    Description: Existing VPC ID for ECS services\n\n  PublicSubnets:\n    Type: List<AWS::EC2::Subnet::Id>\n    Description: Comma-separated list of public subnet IDs\n\n  PrivateSubnets:\n    Type: List<AWS::EC2::Subnet::Id>\n    Description: Comma-separated list of private subnet IDs for ECS tasks\n\n  ClaraBackendImage:\n    Type: String\n    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-backend\n    Description: ECR image URI for the Clara backend service\n\n  ClaraAgentImage:\n    Type: String\n    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-agent-worker\n    Description: ECR image URI for the Clara agent worker\n\n  ClaraFrontendImage:\n    Type: String\n    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-frontend\n    Description: ECR image URI for the Clara frontend service\n\n  ContainerPort:\n    Type: Number\n    Default: 8000\n    Description: Backend container port exposed to the ALB\n\n  DesiredCount:\n    Type: Number\n    Default: 1\n    Description: Number of tasks to run for the backend service\n\nResources:\n  ClaraCluster:\n    Type: AWS::ECS::Cluster\n    Properties:\n      ClusterName: !Sub 'infoservices-clara-${Stage}'\n\n  ClaraBackendTaskExecutionRole:\n    Type: AWS::IAM::Role\n    Properties:\n      AssumeRolePolicyDocument:\n        Version: '2012-10-17'\n        Statement:\n          - Effect: Allow\n            Principal:\n              Service: ecs-tasks.amazonaws.com\n            Action: 'sts:AssumeRole'\n      ManagedPolicyArns:\n        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy\n\n  ClaraBackendLogGroup:\n    Type: AWS::Logs::LogGroup\n    Properties:\n      LogGroupName: !Sub '/ecs/infoservices-clara-backend-${Stage}'\n      RetentionInDays: 14\n\n  ClaraBackendTaskDefinition:\n    Type: AWS::ECS::TaskDefinition\n    Properties:\n      Family: !Sub 'infoservices-clara-backend-${Stage}'\n      RequiresCompatibilities:\n        - FARGATE\n      NetworkMode: awsvpc\n      Cpu: '512'\n      Memory: '1024'\n      ExecutionRoleArn: !GetAtt ClaraBackendTaskExecutionRole.Arn\n      ContainerDefinitions:\n        - Name: clara-backend\n          Image: !Ref ClaraBackendImage\n          PortMappings:\n            - ContainerPort: !Ref ContainerPort\n          LogConfiguration:\n            LogDriver: awslogs\n            Options:\n              awslogs-group: !Ref ClaraBackendLogGroup\n              awslogs-region: !Ref AWS::Region\n              awslogs-stream-prefix: ecs\n          Environment:\n            - Name: STAGE\n              Value: !Ref Stage\n\n  ClaraBackendSecurityGroup:\n    Type: AWS::EC2::SecurityGroup\n    Properties:\n      GroupDescription: Allow ALB to reach ECS tasks\n      VpcId: !Ref VpcId\n\n  ClaraAlbSecurityGroup:\n    Type: AWS::EC2::SecurityGroup\n    Properties:\n      GroupDescription: Allow inbound HTTP traffic\n      VpcId: !Ref VpcId\n      SecurityGroupIngress:\n        - IpProtocol: tcp\n          FromPort: 80\n          ToPort: 80\n          CidrIp: 0.0.0.0/0\n\n  ClaraAlb:\n    Type: AWS::ElasticLoadBalancingV2::LoadBalancer\n    Properties:\n      Name: !Sub 'infoservices-clara-alb-${Stage}'\n      Scheme: internet-facing\n      Type: application\n      Subnets: !Ref PublicSubnets\n      SecurityGroups:\n        - !Ref ClaraAlbSecurityGroup\n\n  ClaraAlbTargetGroup:\n    Type: AWS::ElasticLoadBalancingV2::TargetGroup\n    Properties:\n      Name: !Sub 'infoservices-clara-tg-${Stage}'\n      Port: !Ref ContainerPort\n      Protocol: HTTP\n      VpcId: !Ref VpcId\n      TargetType: ip\n      HealthCheckPath: '/health'\n\n  ClaraAlbListener:\n    Type: AWS::ElasticLoadBalancingV2::Listener\n    Properties:\n      LoadBalancerArn: !Ref ClaraAlb\n      Port: 80\n      Protocol: HTTP\n      DefaultActions:\n        - Type: forward\n          TargetGroupArn: !Ref ClaraAlbTargetGroup\n\n  ClaraBackendService:\n    Type: AWS::ECS::Service\n    DependsOn:\n      - ClaraAlbListener\n    Properties:\n      ServiceName: !Sub 'infoservices-clara-backend-${Stage}'\n      Cluster: !Ref ClaraCluster\n      DeploymentConfiguration:\n        MaximumPercent: 200\n        MinimumHealthyPercent: 50\n      DesiredCount: !Ref DesiredCount\n      LaunchType: FARGATE\n      TaskDefinition: !Ref ClaraBackendTaskDefinition\n      NetworkConfiguration:\n        AwsvpcConfiguration:\n          AssignPublicIp: DISABLED\n          Subnets: !Ref PrivateSubnets\n          SecurityGroups:\n            - !Ref ClaraBackendSecurityGroup\n      LoadBalancers:\n        - ContainerName: clara-backend\n          ContainerPort: !Ref ContainerPort\n          TargetGroupArn: !Ref ClaraAlbTargetGroup\n\nOutputs:\n  BackendEndpoint:\n    Description: Public URL for the Clara backend\n    Value: !Sub 'http://${ClaraAlb.DNSName}'",
+    "command": [
+      "deploy"
+    ],
+    "options": {
+      "stage": "dev"
+    },
+    "orgId": "fd3f640f-be9b-418c-ab46-b255aaf96682",
+    "orgName": "infoservices26",
+    "userId": "fGBvQBhFsjQ7by3hR7",
+    "userName": "infoservices26",
+    "serviceProviderAwsAccountId": "339713066436",
+    "serviceProviderAwsCfStackId": null,
+    "serviceProviderAwsCfStackCreated": null,
+    "serviceProviderAwsCfStackUpdated": null,
+    "serviceProviderAwsCfStackStatus": null,
+    "serviceProviderAwsCfStackOutputs": null
+  }
+}

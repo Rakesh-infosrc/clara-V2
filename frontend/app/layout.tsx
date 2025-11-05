@@ -1,11 +1,9 @@
+import type { Metadata } from 'next';
 import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
-import { headers } from 'next/headers';
 import { APP_CONFIG_DEFAULTS } from '@/app-config';
 import { ApplyThemeScript, ThemeToggle } from '@/components/theme-toggle';
-import { getAppConfig } from '@/lib/utils';
 import './globals.css';
-import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   icons: {
@@ -48,9 +46,10 @@ interface RootLayoutProps {
   children: React.ReactNode;
 }
 
+export const dynamic = 'force-static';
+
 export default async function RootLayout({ children }: RootLayoutProps) {
-  const hdrs = await headers();
-  const { accent, accentDark, pageTitle, pageDescription } = await getAppConfig(hdrs);
+  const { accent, accentDark, pageTitle, pageDescription } = APP_CONFIG_DEFAULTS;
 
   // check provided accent colors against defaults, and apply styles if they differ (or in development mode)
   // generate a hover color for the accent color by mixing it with 20% black

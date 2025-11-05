@@ -7,6 +7,7 @@ from .config import (
     EMPLOYEE_TABLE_NAME,
     EMPLOYEE_EMAIL_INDEX,
     EMPLOYEE_ID_INDEX,
+    EMPLOYEE_PRIMARY_KEY,
 )
 
 
@@ -169,7 +170,7 @@ def get_employee_by_id(employee_id: str) -> dict | None:
     response = None
 
     try:
-        response = table.get_item(Key={"id": key})
+        response = table.get_item(Key={EMPLOYEE_PRIMARY_KEY: key})
     except ClientError as exc:
         print(f"[employee_repository] DynamoDB get_item failed: {exc}")
 

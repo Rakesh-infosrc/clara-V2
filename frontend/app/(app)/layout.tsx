@@ -35,7 +35,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
             href="https://www.infoservices.com/"
             className="underline underline-offset-4"
           >
-            info 
+            info
           </a>
         </span>
       </header>

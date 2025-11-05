@@ -12,6 +12,14 @@ from .employee_repository import get_employee_by_email, get_employee_by_id
 from .manager_visit_repository import get_manager_visit
 from .sms_sender import send_sms_via_sns
 
+
+def _phone_hint(phone: str) -> str:
+    """Return a short hint such as the last four digits for display messages."""
+    digits = "".join(ch for ch in (phone or "") if ch.isdigit())
+    if len(digits) >= 4:
+        return digits[-4:]
+    return ""
+
 def _normalize_email(email: str | None) -> str:
     return (email or "").strip().lower()
 
@@ -89,7 +97,7 @@ def _issue_otp(email_key: str, record: dict) -> str:
 
     # Try SMS first when phone is available
     if phone_number:
-    
+
         sms_message = (
             f"Hello {emp_name}, your Clara verification code is {generated_otp}. "
             "Use this OTP to complete your sign-in."
@@ -134,9 +142,15 @@ def _issue_otp(email_key: str, record: dict) -> str:
         },
     )
     dev_note = " (OTP logged to server console for developers.)" if dev_mode else ""
+    hint = _phone_hint(phone_number)
+    destination_line = (
+        "your registered mobile number"
+        if not hint
+        else f"your registered mobile number ending in {hint}"
+    )
     return (
-        f"✅ Hi {emp_name}, I sent an OTP via {delivery_method} ({delivery_details}). "
-        "Please tell me the OTP now." + dev_note
+        f"✅ Hi {emp_name}, I've sent an OTP to {destination_line}. "
+        "Please provide the code here to finish verification." + dev_note
     )
 
 
@@ -144,7 +158,9 @@ def _manager_visit_message(emp_id: Optional[str], emp_name: str, default_message
     if not emp_id:
         return default_message
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    # Use non-zero-padded format to match DynamoDB data (e.g., "2025-11-3" not "2025-11-03")
+    now = datetime.now()
+    today = f"{now.year}-{now.month}-{now.day}"
     record = get_manager_visit(emp_id, today)
     if not record:
         return default_message
@@ -155,11 +171,10 @@ def _manager_visit_message(emp_id: Optional[str], emp_name: str, default_message
     parts = [
         "✅ OTP verified.",
         f"Welcome {emp_name}!",
-        f"Hope your visit to our {office} office goes smoothly.",
+        f"Hope you had a smooth and comfortable journey. It was wonderful having you at our {office} office.",
+        "We truly hope your visit was both memorable and meaningful.",
+        "Thanks so much for taking the time to be with us."
     ]
-    if manager_name:
-        parts.append(f"Your meeting with {manager_name} is confirmed.")
-    parts.append("Let me know if you need any assistance while you're here.")
 
     return "\n".join(parts)
 

@@ -69,16 +69,17 @@ async def company_info(
     query: str = "general"
 ) -> str:
     """
-    Fetch company information from company_info.pdf.
+    Fetch company information from company_info.pdf stored in S3.
     
     Args:
         query: Optional keyword to search inside the PDF. 
-               If 'general', return the first page summary.
+               If 'general', return comprehensive company overview.
+               Common queries: 'about', 'services', 'contact', 'location', 'history'
     """
     try:
         pdf_bytes, error_msg = _fetch_company_pdf_bytes()
         if not pdf_bytes:
-            return error_msg or "Company information file is missing."
+            return error_msg or "I apologize, but I'm unable to access the company information at the moment. Let me know if you'd like me to bring in a human teammate."
 
         reader = PdfReader(io.BytesIO(pdf_bytes))
         text = ""
@@ -86,28 +87,62 @@ async def company_info(
             text += page.extract_text() + "\n"
 
         if not text.strip():
-            return "Company information could not be extracted."
+            return "I'm sorry, but I couldn't extract the company information from our database. Let me know if you'd like me to involve a team member."
 
         lang = _get_current_language()
         localized_text = _filter_text_for_language(text, lang)
+        
+        # Use localized text if available, otherwise fall back to full text
+        search_text = localized_text if localized_text.strip() else text
 
-        # If user asked general
-        if query.lower() == "general":
-            snippet = localized_text[:600] if localized_text else ""
-            return (snippet or text[:600]) + "..."
+        # Handle different types of queries
+        query_lower = query.lower().strip()
+        
+        # General company information
+        if query_lower in ["general", "about", "company", "info", "information", "overview"]:
+            # Return first 1500 characters for a good overview, but break at sentence boundary
+            max_length = 1500
+            snippet = search_text[:max_length] if search_text else ""
+            
+            # Find the last complete sentence within the limit
+            if len(search_text) > max_length:
+                # Look for sentence endings (., !, ?)
+                last_period = max(snippet.rfind('.'), snippet.rfind('!'), snippet.rfind('?'))
+                if last_period > 500:  # Only break at sentence if we have at least 500 chars
+                    snippet = snippet[:last_period + 1]
+                snippet += "\n\n...Would you like to know more about any specific aspect?"
+            
+            return f"Here's information about our company:\n\n{snippet}"
 
-        # Search for keyword inside text
-        query_lower = query.lower()
-        matches = [line for line in localized_text.split("\n") if query_lower in line.lower()]
+        # Specific keyword search
+        lines = search_text.split("\n")
+        matches = []
+        
+        # Search for exact matches first
+        for line in lines:
+            if query_lower in line.lower() and line.strip():
+                matches.append(line.strip())
+                
+        # If no exact matches, try broader search
+        if not matches:
+            for line in lines:
+                if any(word in line.lower() for word in query_lower.split()) and line.strip():
+                    matches.append(line.strip())
 
         if matches:
-            return " | ".join(matches[:5])  # return top 5 matches
+            # Return top 3 most relevant matches
+            result = "\n".join(matches[:3])
+            return f"Here's what I found about '{query}':\n\n{result}"
         else:
-            # Fallback: search entire document before giving up
-            backup_matches = [line for line in text.split("\n") if query_lower in line.lower()]
-            if backup_matches:
-                return " | ".join(backup_matches[:5])
-            return f"No specific details found for '{query}'."
+            # Fallback: provide general info and suggest alternatives
+            snippet = search_text[:400] if search_text else ""
+            return (
+                f"I couldn't find specific information about '{query}', but here's some general company information:\n\n"
+                f"{snippet}...\n\nLet me know if you'd like me to connect you with a human teammate for more details."
+            )
 
     except Exception as e:
-        return f"Error reading company information: {str(e)}"
+        return (
+            "I'm experiencing technical difficulties accessing company information. "
+            f"I've logged the issue and can loop in a human teammate if needed. Error: {str(e)}"
+        )

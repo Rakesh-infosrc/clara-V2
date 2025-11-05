@@ -2,6 +2,26 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
 
+
+def _generate_date_candidates(date_key: str | None) -> list[str]:
+    """Return possible DynamoDB date keys (both padded and non-padded)."""
+    base_date = date_key or datetime.now().strftime("%Y-%m-%d")
+    candidates = [base_date]
+
+    try:
+        parsed = datetime.strptime(base_date, "%Y-%m-%d")
+    except ValueError:
+        return candidates
+
+    padded = parsed.strftime("%Y-%m-%d")
+    non_padded = f"{parsed.year}-{parsed.month}-{parsed.day}"
+
+    for variant in (padded, non_padded):
+        if variant not in candidates:
+            candidates.append(variant)
+
+    return candidates
+
 from .config import AWS_REGION, MANAGER_VISIT_TABLE_NAME
 
 _dynamodb = None
@@ -27,43 +47,35 @@ def get_manager_visit(employee_id: str, visit_date: str | None = None) -> dict |
     if not normalized_id:
         return None
 
-    date_key = visit_date or datetime.now().strftime("%Y-%m-%d")
     table = _get_table()
+    date_candidates = _generate_date_candidates(visit_date)
+    employee_candidates = [value for value in {normalized_id: None, employee_id: None} if value]
 
-    try:
-        response = table.get_item(
-            Key={
-                "employee_id": normalized_id,
-                "visit_date": date_key,
-            }
-        )
-    except ClientError as exc:
-        print(
-            "[manager_visit_repository] get_item failed",
-            {
-                "employee_id": normalized_id,
-                "visit_date": date_key,
-                "error": str(exc),
-            },
-        )
-        return None
+    for date_key in date_candidates:
+        for emp_key in employee_candidates:
+            try:
+                response = table.get_item(
+                    Key={
+                        "employee_id": emp_key,
+                        "visit_date": date_key,
+                    }
+                )
+            except ClientError as exc:
+                print(
+                    "[manager_visit_repository] get_item failed",
+                    {
+                        "employee_id": emp_key,
+                        "visit_date": date_key,
+                        "error": str(exc),
+                    },
+                )
+                continue
 
-    item = response.get("Item")
-    if item:
-        return item
+            item = response.get("Item")
+            if item:
+                return item
 
-    # Fallback: some tables may store mixed-case keys
-    try:
-        response = table.get_item(
-            Key={
-                "employee_id": employee_id,
-                "visit_date": date_key,
-            }
-        )
-    except ClientError:
-        return None
-
-    return response.get("Item")
+    return None
 
 
 def put_manager_visit(

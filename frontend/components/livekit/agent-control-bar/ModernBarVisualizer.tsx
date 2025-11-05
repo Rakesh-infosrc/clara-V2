@@ -1,18 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { animate } from 'animejs';
 
 const BAR_COUNT = 20;
 const MAX_BAR_HEIGHT = 100; // percent
 const MIN_BAR_HEIGHT = 10; // percent
 
+type FrequencyArray = Parameters<AnalyserNode['getByteFrequencyData']>[0];
+
 export default function ModernBarVisualizer() {
   const containerRef = useRef<SVGSVGElement | null>(null);
   const [audioContext, setAudioContext] = useState<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<FrequencyArray | null>(null);
   const barsRef = useRef<(SVGRectElement | null)[]>([]);
 
   useEffect(() => {
+    let createdContext: AudioContext | null = null;
+
     async function setupAudio() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -21,11 +24,12 @@ export default function ModernBarVisualizer() {
         const analyser = context.createAnalyser();
         analyser.fftSize = 64;
         const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+        const dataArray = new Uint8Array(bufferLength) as FrequencyArray;
         source.connect(analyser);
 
         analyserRef.current = analyser;
         dataArrayRef.current = dataArray;
+        createdContext = context;
         setAudioContext(context);
       } catch (err) {
         console.error('Microphone permission denied or error:', err);
@@ -34,7 +38,7 @@ export default function ModernBarVisualizer() {
     setupAudio();
 
     return () => {
-      audioContext?.close();
+      void createdContext?.close();
     };
   }, []);
 
@@ -54,19 +58,17 @@ export default function ModernBarVisualizer() {
       // Limit the frequency data to the number of bars
       const values = Array.from(dataArray).slice(0, BAR_COUNT);
 
-      const heights = values.map(value => 
-        ((value / 255) * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT)) + MIN_BAR_HEIGHT
+      const heights = values.map(
+        (value) => (value / 255) * (MAX_BAR_HEIGHT - MIN_BAR_HEIGHT) + MIN_BAR_HEIGHT
       );
 
-      const ys = heights.map(height => 100 - height);
+      const ys = heights.map((height) => 100 - height);
 
-      animate({
-        targets,
-        height: heights.map(h => `${h}%`),
-        y: ys,
-        easing: 'easeOutQuad',
-        duration: 200,
-        autoplay: true,
+      targets.forEach((bar, index) => {
+        const height = heights[index] ?? MIN_BAR_HEIGHT;
+        const y = ys[index] ?? 100 - MIN_BAR_HEIGHT;
+        bar.setAttribute('height', `${height}`);
+        bar.setAttribute('y', `${y}`);
       });
 
       animationFrameId = requestAnimationFrame(animateBars);
@@ -77,7 +79,7 @@ export default function ModernBarVisualizer() {
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [audioContext]);
+  }, [audioContext, audioContext?.state]);
 
   return (
     <svg
@@ -90,7 +92,9 @@ export default function ModernBarVisualizer() {
       {Array.from({ length: BAR_COUNT }).map((_, i) => (
         <rect
           key={i}
-          ref={el => (barsRef.current[i] = el)}
+          ref={(el) => {
+            barsRef.current[i] = el;
+          }}
           x={i * 4 + 2}
           y={100 - MIN_BAR_HEIGHT}
           width={2}

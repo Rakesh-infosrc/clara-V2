@@ -18,7 +18,7 @@ export const Welcome = ({
       ref={ref}
       inert={disabled}
       className={cn(
-        'fixed inset-0 mx-auto flex h-svh flex-col items-center justify-center text-center backdrop-blur-md/30',
+        'backdrop-blur-md/30 fixed inset-0 mx-auto flex h-svh flex-col items-center justify-center text-center',
         disabled ? 'z-10' : 'z-20'
       )}
     >
@@ -62,15 +62,16 @@ export const Welcome = ({
         ))}
       </svg>
 
-
-
-
       <p className="text-fg1 max-w-prose pt-1 leading-6 font-medium">
-        Chat live with our{' '}
-        <span className="text-blue-400 font-bold text-[20px]">Clara</span>{' '}
+        Chat live with our <span className="text-[20px] font-bold text-blue-400">Clara</span>{' '}
         virtual receptionist
       </p>
-      <Button variant="primary" size="lg" onClick={onStartCall} className="mt-6 w-64 font-mono bg-blue-100 text-[15px] font-bold ">
+      <Button
+        variant="primary"
+        size="lg"
+        onClick={onStartCall}
+        className="mt-6 w-64 bg-blue-100 font-mono text-[15px] font-bold"
+      >
         {startButtonText}
       </Button>
       <footer className="fixed bottom-5 left-0 z-20 flex w-full items-center justify-center">
@@ -80,9 +81,9 @@ export const Welcome = ({
             target="_blank"
             rel="noopener noreferrer"
             href="https://www.infoservices.com/"
-            className="underline text-blue-400"
+            className="text-blue-400 underline"
           >
-            Info Services 
+            Info Services
           </a>
           .
         </p>

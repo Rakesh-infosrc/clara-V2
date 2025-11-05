@@ -1,11 +1,15 @@
 import os
+import re
 import uvicorn
 import time
 import random
 import json
 import warnings
+import asyncio
+import contextlib
+import io
 from datetime import datetime
-from fastapi import FastAPI, Query, File, UploadFile, Request
+from fastapi import FastAPI, Query, File, UploadFile, Request, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -22,6 +26,7 @@ from tools import run_face_verify
 from livekit import api  # Correct LiveKit import
 from fastapi.responses import JSONResponse
 from livekit.protocol.agent_dispatch import CreateAgentDispatchRequest
+from flow_signal import get_signal as flow_get_signal
 
 # Load environment variables from .env
 load_dotenv()
@@ -30,7 +35,23 @@ API_KEY = os.getenv("LIVEKIT_API_KEY", "devkey")
 API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
 
+ORIGINS = [
+    "http://localhost:3000",
+    "http://localhost:3003",
+    "http://127.0.0.1:3000",
+    "http://clara-frontend.s3-website-us-east-1.amazonaws.com/",
+    "http://clara-alb-dev-926087638.us-east-1.elb.amazonaws.com",
+    "*",
+]
+
+
 app = FastAPI()
+
+
+@app.get("/health", include_in_schema=False)
+async def health_check():
+    """ALB health check endpoint."""
+    return {"status": "ok"}
 
 @app.get("/token")
 async def create_token(room: str, identity: str):
@@ -44,14 +65,160 @@ async def create_token(room: str, identity: str):
         return JSONResponse(status_code=500, content={"error": f"Failed to create token: {str(e)}"})
 
 @app.post("/dispatch")
-async def dispatch_agent(room: str = "Clara-room", agent_name: str = "clara-receptionist", metadata: str = ""):
+async def dispatch_agent(request: Request):
     try:
+        payload = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+        room = payload.get("room") or request.query_params.get("room") or "Clara-room"
+        agent_name = payload.get("agent_name") or request.query_params.get("agent_name") or "clara-receptionist"
+        metadata = payload.get("metadata") or request.query_params.get("metadata") or ""
+
         async with api.LiveKitAPI() as lk:
             req = CreateAgentDispatchRequest(agent_name=agent_name, room=room, metadata=metadata)
             dispatch = await lk.agent_dispatch.create_dispatch(req)
-            return {"success": True, "dispatch_id": dispatch.id, "room": dispatch.room, "agent": dispatch.agent_name}
+            return {
+                "success": True,
+                "dispatch_id": dispatch.id,
+                "room": dispatch.room,
+                "agent": dispatch.agent_name,
+            }
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": f"Failed to dispatch agent: {str(e)}"})
+
+
+@app.get("/get_signal")
+async def get_flow_signal():
+    """Expose the latest flow signal for the frontend polling loop."""
+    signal = flow_get_signal(clear=False)
+    if not signal:
+        return {"name": None, "payload": {}}
+    return signal
+
+
+@app.post("/clear_signal")
+async def clear_flow_signal():
+    """Clear any pending flow signal after the frontend processes it."""
+    flow_get_signal(clear=True)
+    return {"cleared": True}
+
+
+@app.post("/test_signal")
+async def test_signal():
+    """Test endpoint to manually trigger face capture signal"""
+    from flow_signal import post_signal
+    post_signal("start_face_capture", {
+        "message": "Please tap the Employee Mode button to proceed.",
+        "next_endpoint": "/flow/face_recognition"
+    })
+    return {"signal_posted": True}
+
+
+@app.post("/admin/run-face-encoding")
+async def run_face_encoding_endpoint():
+    """Trigger the face encoding pipeline and return its console output."""
+
+    loop = asyncio.get_running_loop()
+
+    def _run_job() -> dict:
+        from encode_faces import main as encode_faces_main
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            encode_faces_main()
+
+        output = buffer.getvalue()
+        encoded_ids = []
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("✔ Encoded Employee ID:"):
+                match = re.search(r"✔ Encoded Employee ID:\s*(.+)", stripped)
+                if match:
+                    encoded_ids.append(match.group(1).strip())
+
+        encoded_count = len(encoded_ids)
+
+        return {
+            "status": "success",
+            "logs": output,
+            "encoded_count": encoded_count,
+            "encoded_employee_ids": encoded_ids,
+        }
+
+    try:
+        result = await loop.run_in_executor(None, _run_job)
+        return result
+    except Exception as exc:  # pragma: no cover - runtime safety
+        raise HTTPException(status_code=500, detail=f"Face encoding failed: {exc}") from exc
+
+
+@app.post("/trigger_employee_mode")
+async def trigger_employee_mode():
+    """Test endpoint to manually trigger employee classification and face capture"""
+    from flow_manager import VirtualReceptionistFlow
+    from flow_signal import post_signal
+    
+    # Create flow manager instance
+    flow_manager = VirtualReceptionistFlow()
+    
+    # Simulate employee classification
+    success, response, next_state = flow_manager.process_user_classification("I am an employee")
+    
+    return {
+        "success": success,
+        "response": response,
+        "next_state": next_state.value if next_state else None,
+        "signal_posted": success
+    }
+
+
+@app.get("/test_face_db")
+async def test_face_database():
+    """Test endpoint to check face database status"""
+    from tools.face_recognition import get_face_encoding_data
+    import os
+    
+    result = {
+        "s3_bucket": os.getenv('FACE_S3_BUCKET', 'NOT SET'),
+        "s3_key": os.getenv('FACE_ENCODING_S3_KEY', 'NOT SET'),
+        "aws_region": os.getenv('AWS_REGION', 'NOT SET')
+    }
+    
+    try:
+        encoding_data = get_face_encoding_data()
+        if encoding_data:
+            result["status"] = "success"
+            result["data_keys"] = list(encoding_data.keys())
+            result["num_encodings"] = len(encoding_data.get("encodings", []))
+            result["employee_ids"] = encoding_data.get("employee_ids", [])
+        else:
+            result["status"] = "no_data"
+            result["error"] = "No encoding data found"
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = str(e)
+    
+    return result
+
+
+async def _terminate_livekit_room(room: str) -> None:
+    """Force terminate a LiveKit room so stale participants don't linger."""
+    if not room:
+        return
+
+    async with api.LiveKitAPI() as lk:
+        try:
+            await lk.room.delete_room(room=room)
+            print(f"🧹 Terminated LiveKit room {room}")
+        except Exception as e:
+            # Ignore if room already gone; re-raise others so caller can log
+            if "not found" in str(e).lower():
+                print(f"Info: room {room} already removed")
+                return
+            raise
 
 # Pydantic models for request validation
 class EmployeeVerificationRequest(BaseModel):
@@ -62,7 +229,7 @@ class EmployeeVerificationRequest(BaseModel):
 # Allow frontend requests
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -593,8 +760,9 @@ async def capture_visitor_photo_flow(
         host_employee = session.user_data.get('host_employee') if session else ""
         photo_location = session.user_data.get("photo_location") if session else None
 
-        # Log visitor and notify host now that photo is captured
-        if visitor_name and host_employee:
+        # Log visitor and notify host now that photo is captured (if not already logged)
+        already_logged = session.user_data.get("visitor_logged") if session else False
+        if visitor_name and host_employee and not already_logged:
             try:
                 log_result = await log_and_notify_visitor(
                     None,
@@ -606,8 +774,14 @@ async def capture_visitor_photo_flow(
                     photo_location,
                 )
                 print(f"[VisitorPhoto] log_and_notify_visitor -> {log_result}")
+                if session:
+                    session.user_data["visitor_logged"] = True
+                    session.user_data["visitor_log_result"] = log_result
+                    flow_manager.save_sessions()
             except Exception as log_exc:
                 print(f"Warning: log_and_notify_visitor failed: {log_exc}")
+        elif already_logged:
+            print("[VisitorPhoto] Visitor already logged earlier; skipping duplicate log call")
         else:
             print("Warning: Skipping visitor log/notify due to missing visitor or host info")
 
@@ -648,6 +822,28 @@ async def get_flow_status():
         }
 
 
+@app.post("/flow/classify_user")
+async def classify_user(request: Request):
+    """Process user classification - called by agent"""
+    try:
+        body = await request.json()
+        user_input = body.get("user_input", "")
+        
+        from flow_manager import flow_manager
+        success, response, next_state = flow_manager.process_user_classification(user_input)
+        
+        return {
+            "success": success,
+            "response": response,
+            "next_state": next_state.value if next_state else None
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error processing classification: {str(e)}"
+        }
+
+
 @app.post("/post_signal")
 async def post_signal_endpoint(request: Request):
     try:
@@ -670,38 +866,28 @@ async def post_signal_endpoint(request: Request):
     except Exception as e:
         return {"success": False, "error": f"Error posting signal: {str(e)}"}
 
-@app.get("/get_signal")
-async def get_signal():
-    """Get signals from the flow manager for frontend communication"""
-    try:
-        from flow_signal import get_signal
-        signal = get_signal(clear=False)  # Get but don't clear the signal immediately
-        return signal if signal else {}
-    except Exception as e:
-        return {
-            "error": f"Error getting signal: {str(e)}"
-        }
-
-@app.post("/clear_signal")
-async def clear_signal():
-    """Clear the current signal after frontend has processed it"""
-    try:
-        from flow_signal import get_signal
-        signal = get_signal(clear=True)  # Clear the signal
-        return {"success": True, "cleared": signal is not None}
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Error clearing signal: {str(e)}"
-        }
+# Duplicate endpoints removed - using the ones defined earlier in the file
 
 
 @app.post("/flow/end")
-async def end_flow_session():
+async def end_flow_session(request: Request):
     """End the current flow session"""
     try:
+        payload = {}
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
         from flow_manager import flow_manager
         message = flow_manager.end_session()
+        room = (payload.get("room") if isinstance(payload, dict) else None) or request.query_params.get("room")
+
+        if room:
+            try:
+                await _terminate_livekit_room(room)
+            except Exception as cleanup_error:
+                print(f"Warning: failed to terminate LiveKit room {room}: {cleanup_error}")
         return {
             "success": True,
             "message": message
@@ -714,7 +900,7 @@ async def end_flow_session():
 
 
 @app.get("/get-token")
-def get_token(identity: str = Query(...), room: str = "Clara-room"):
+def get_token(identity: str = Query(...), room: str = Query("Clara-room")):
     """
     Generate a LiveKit access token for the given identity.
     Handles reconnects by generating unique identities per session.

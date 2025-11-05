@@ -1,18 +1,28 @@
-// frontend\components\FaceVerifyResult.tsx
-import React from "react";
+import React from 'react';
 
-const FaceVerifyResult: React.FC<{ result: any }> = ({ result }) => {
-  if (result.status === "success") {
+interface FaceVerifyResultData {
+  status: 'success' | 'error' | string;
+  name?: string;
+  employeeId?: string;
+  message?: string;
+}
+
+interface FaceVerifyResultProps {
+  result: FaceVerifyResultData;
+}
+
+const FaceVerifyResult: React.FC<FaceVerifyResultProps> = ({ result }) => {
+  if (result.status === 'success') {
     return (
-      <div className="mt-3 p-2 bg-green-200 rounded text-red-500">
-        ✅ Verified: <b>{result.name}</b> (ID: {result.employeeId})
+      <div className="mt-3 rounded bg-green-200 p-2 text-red-500">
+        ✅ Verified: <b>{result.name}</b> {result.employeeId ? `(ID: ${result.employeeId})` : null}
       </div>
     );
   }
 
   return (
-    <div className="mt-3 p-2 bg-red-200 rounded">
-      ❌ Error: {result.message || "Face not recognized"}
+    <div className="mt-3 rounded bg-red-200 p-2">
+      ❌ Error: {result.message ?? 'Face not recognized'}
     </div>
   );
 };

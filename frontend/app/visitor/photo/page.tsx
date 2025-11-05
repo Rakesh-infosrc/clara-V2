@@ -1,8 +1,8 @@
-import React from "react";
-import VideoCapture from "@/components/VideoCapture";
+import React from 'react';
+import VideoCapture from '@/components/VideoCapture';
 
 export const metadata = {
-  title: "Visitor Photo Capture",
+  title: 'Visitor Photo Capture',
 };
 
 export default function VisitorPhotoPage() {

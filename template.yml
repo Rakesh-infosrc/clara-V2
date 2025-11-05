@@ -1,0 +1,540 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Clara Virtual Receptionist – ECS Fargate Infrastructure
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for the Clara VPC
+  ResourceBase:
+    Type: String
+    Default: clara
+    Description: Base name used for Clara resource naming
+  LivekitURL:
+    Type: String
+    Default: wss://fridayjarvis-nxz35tbu.livekit.cloud
+  LivekitAPIKey:
+    Type: String
+    Default: API5pBVs37c2cTU
+  LivekitAPISecret:
+    Type: String
+    Default: A2oW6SeOeUI6nOOmCEDruAN4KYZSjhKpKfZZyKeT6OgB
+  BackendImageUri:
+    Type: String
+    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-backend
+  FrontendImageUri:
+    Type: String
+    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-frontend
+  AgentWorkerImageUri:
+    Type: String
+    Default: 339713066436.dkr.ecr.us-east-1.amazonaws.com/clara-agent-worker
+  GoogleAPIKey:
+    Type: String
+    Default: AIzaSyBWSTq8vF0Ms98lTr0kkVmEOAfKIvaqFjw
+
+Conditions:
+  IsProd: !Equals [!Ref Stage, prod]
+
+Resources:
+  ############################################
+  # Networking Layer
+  ############################################
+  ClaraVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceBase}-vpc-${Stage}'
+
+  ClaraSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaraVPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceBase}-subnet-a-${Stage}'
+
+  ClaraSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ClaraVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${ResourceBase}-subnet-b-${Stage}'
+
+  ClaraInternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  ClaraVPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref ClaraInternetGateway
+      VpcId: !Ref ClaraVPC
+
+  ClaraRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ClaraVPC
+
+  ClaraRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ClaraVPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ClaraRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ClaraInternetGateway
+
+  ClaraSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ClaraSubnetA
+      RouteTableId: !Ref ClaraRouteTable
+
+  ClaraSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ClaraSubnetB
+      RouteTableId: !Ref ClaraRouteTable
+
+  ############################################
+  # Security Groups
+  ############################################
+  ClaraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTP and internal ECS communication
+      VpcId: !Ref ClaraVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: !Ref VpcCidr
+
+  ############################################
+  # ECS Cluster & Roles
+  ############################################
+  ClaraECSCluster:
+    Type: AWS::ECS::Cluster
+
+  ClaraExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ClaraAppAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - s3:*
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - sns:Publish
+                Resource: '*'
+
+  ClaraLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/ecs/${ResourceBase}-${Stage}'
+      RetentionInDays: 7
+
+  ############################################
+  # Load Balancer
+  ############################################
+  ClaraALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Subnets:
+        - !Ref ClaraSubnetA
+        - !Ref ClaraSubnetB
+      SecurityGroups:
+        - !Ref ClaraSecurityGroup
+      Type: application
+      Name: !Sub '${ResourceBase}-alb-${Stage}'
+
+  ClaraBackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref ClaraVPC
+      Port: 8000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /health
+      Matcher:
+        HttpCode: 200
+      Name: !Sub '${ResourceBase}-backend-tg-${Stage}'
+
+  ClaraFrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref ClaraVPC
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: 200
+      Name: !Sub '${ResourceBase}-frontend-tg-${Stage}'
+
+  ClaraListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref ClaraALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ClaraFrontendTargetGroup
+
+  ClaraBackendListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ClaraListener
+      Priority: 100
+      Conditions:
+        - Field: path-pattern
+          Values: 
+            - "/api/*"
+            - "/health"
+            - "/dispatch"
+            - "/get_signal"
+            - "/get-token"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ClaraBackendTargetGroup
+
+  ClaraBackendListenerRule2:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref ClaraListener
+      Priority: 101
+      Conditions:
+        - Field: path-pattern
+          Values: 
+            - "/flow/*"
+            - "/otp/*"
+            - "/employee_verify"
+            - "/notify_agent_verification"
+            - "/post_signal"
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ClaraBackendTargetGroup
+
+  ############################################
+  # ECS Task Definitions
+  ############################################
+  ClaraBackendTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ResourceBase}-backend-${Stage}'
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ClaraExecutionRole.Arn
+      TaskRoleArn: !GetAtt ClaraExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: clara-backend
+          Image: !Ref BackendImageUri
+          PortMappings:
+            - ContainerPort: 8000
+          Environment:
+            - Name: LIVEKIT_API_KEY
+              Value: !Ref LivekitAPIKey
+            - Name: LIVEKIT_API_SECRET
+              Value: !Ref LivekitAPISecret
+            - Name: LIVEKIT_URL
+              Value: !Ref LivekitURL
+            - Name: GOOGLE_API_KEY
+              Value: !Ref GoogleAPIKey
+            - Name: FACE_S3_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_ENCODING_S3_KEY
+              Value: Pickle_file/encoding.pkl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: STAGE
+              Value: !Ref Stage
+            - Name: ROOT_PATH
+              Value: !Sub '/${Stage}'
+            - Name: EMPLOYEE_TABLE_NAME
+              Value: zenith-hr-employees
+            - Name: EMPLOYEE_EMAIL_INDEX
+              Value: EmailIndex
+            - Name: EMPLOYEE_ID_INDEX
+              Value: EmployeeIdIndex
+            - Name: VISITOR_LOG_TABLE_NAME
+              Value: Clara_visitor_log
+            - Name: MANAGER_VISIT_TABLE_NAME
+              Value: Clara_manager_visits
+            - Name: FACE_IMAGE_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_IMAGE_PREFIX
+              Value: Employee_Images
+            - Name: FACE_IMAGE_EXTENSION
+              Value: png
+            - Name: FACE_S3_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_ENCODING_S3_KEY
+              Value: Pickle_file/encoding.pkl
+            - Name: VISITOR_PHOTO_BUCKET
+              Value: clara-visitor-photos
+            - Name: VISITOR_PHOTO_PREFIX
+              Value: ''
+            - Name: COMPANY_INFO_S3_BUCKET
+              Value: clara-company-info
+            - Name: COMPANY_INFO_S3_KEY
+              Value: Info/company_info.pdf
+            - Name: AWS_SNS_SENDER_ID
+              Value: CLARA
+            - Name: AWS_SNS_SMS_TYPE
+              Value: Transactional
+            - Name: AWS_SNS_ENTITY_ID
+              Value: '1234567890'
+            - Name: AWS_SNS_TEMPLATE_ID
+              Value: TEMPLATE_001
+            - Name: CHE_SMS_DEFAULT_COUNTRY_CODE
+              Value: '+91'
+            - Name: DEV_MODE_OTP
+              Value: 'false'
+            - Name: FACE_RECOGNITION_ENABLED
+              Value: 'true'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ClaraLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+
+  ClaraAgentTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ResourceBase}-agent-${Stage}'
+      Cpu: '1024'
+      Memory: '2048'
+      # Updated for Google API key integration
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ClaraExecutionRole.Arn
+      TaskRoleArn: !GetAtt ClaraExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: clara-agent
+          Image: !Ref AgentWorkerImageUri
+          Command: ["python", "main.py", "start"]
+          Environment:
+            - Name: LIVEKIT_API_KEY
+              Value: !Ref LivekitAPIKey
+            - Name: LIVEKIT_API_SECRET
+              Value: !Ref LivekitAPISecret
+            - Name: LIVEKIT_URL
+              Value: !Ref LivekitURL
+            - Name: GOOGLE_API_KEY
+              Value: !Ref GoogleAPIKey
+            - Name: FACE_S3_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_ENCODING_S3_KEY
+              Value: Pickle_file/encoding.pkl
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+            - Name: STAGE
+              Value: !Ref Stage
+            - Name: ROOT_PATH
+              Value: !Sub '/${Stage}'
+            - Name: EMPLOYEE_TABLE_NAME
+              Value: zenith-hr-employees
+            - Name: EMPLOYEE_EMAIL_INDEX
+              Value: EmailIndex
+            - Name: EMPLOYEE_ID_INDEX
+              Value: EmployeeIdIndex
+            - Name: VISITOR_LOG_TABLE_NAME
+              Value: Clara_visitor_log
+            - Name: MANAGER_VISIT_TABLE_NAME
+              Value: Clara_manager_visits
+            - Name: FACE_IMAGE_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_IMAGE_PREFIX
+              Value: Employee_Images
+            - Name: FACE_IMAGE_EXTENSION
+              Value: png
+            - Name: FACE_S3_BUCKET
+              Value: clara-employee-images
+            - Name: FACE_ENCODING_S3_KEY
+              Value: Pickle_file/encoding.pkl
+            - Name: VISITOR_PHOTO_BUCKET
+              Value: clara-visitor-photos
+            - Name: VISITOR_PHOTO_PREFIX
+              Value: ''
+            - Name: COMPANY_INFO_S3_BUCKET
+              Value: clara-company-info
+            - Name: COMPANY_INFO_S3_KEY
+              Value: Info/company_info.pdf
+            - Name: AWS_SNS_SENDER_ID
+              Value: CLARA
+            - Name: AWS_SNS_SMS_TYPE
+              Value: Transactional
+            - Name: AWS_SNS_ENTITY_ID
+              Value: '1234567890'
+            - Name: AWS_SNS_TEMPLATE_ID
+              Value: TEMPLATE_001
+            - Name: CHE_SMS_DEFAULT_COUNTRY_CODE
+              Value: '+91'
+            - Name: DEV_MODE_OTP
+              Value: 'false'
+            - Name: FACE_RECOGNITION_ENABLED
+              Value: 'true'
+            - Name: BACKEND_URL
+              Value: http://clara-alb-dev-926087638.us-east-1.elb.amazonaws.com
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ClaraLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agent
+
+      
+  ClaraFrontendTask:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${ResourceBase}-frontend-${Stage}'
+      Cpu: '512'
+      Memory: '1024'
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !GetAtt ClaraExecutionRole.Arn
+      TaskRoleArn: !GetAtt ClaraExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: clara-frontend
+          Image: !Ref FrontendImageUri
+          PortMappings:
+            - ContainerPort: 3000
+          Environment:
+            - Name: NEXT_PUBLIC_BACKEND_URL
+              Value: !Sub 'http://${ResourceBase}-backend-internal.${Stage}.local:8000'
+            - Name: NEXT_PUBLIC_CONN_DETAILS_ENDPOINT
+              Value: !Sub 'http://${ResourceBase}-backend-internal.${Stage}.local:8000/token'
+            - Name: LIVEKIT_URL
+              Value: !Ref LivekitURL
+            - Name: LIVEKIT_API_KEY
+              Value: !Ref LivekitAPIKey
+            - Name: LIVEKIT_API_SECRET
+              Value: !Ref LivekitAPISecret
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ClaraLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: frontend
+
+  ############################################
+  # ECS Services
+  ############################################
+  ClaraBackendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ClaraListener
+    Properties:
+      Cluster: !Ref ClaraECSCluster
+      ServiceName: !Sub '${ResourceBase}-backend-svc-${Stage}'
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ClaraBackendTask
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref ClaraSubnetA
+            - !Ref ClaraSubnetB
+          SecurityGroups:
+            - !Ref ClaraSecurityGroup
+      LoadBalancers:
+        - ContainerName: clara-backend
+          ContainerPort: 8000
+          TargetGroupArn: !Ref ClaraBackendTargetGroup
+
+  ClaraAgentService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ClaraBackendService
+    Properties:
+      Cluster: !Ref ClaraECSCluster
+      ServiceName: !Sub '${ResourceBase}-agent-svc-${Stage}'
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ClaraAgentTask
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref ClaraSubnetA
+            - !Ref ClaraSubnetB
+          SecurityGroups:
+            - !Ref ClaraSecurityGroup
+
+  ClaraFrontendService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - ClaraBackendService
+    Properties:
+      Cluster: !Ref ClaraECSCluster
+      ServiceName: !Sub '${ResourceBase}-frontend-svc-${Stage}'
+      DesiredCount: 1
+      LaunchType: FARGATE
+      TaskDefinition: !Ref ClaraFrontendTask
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - !Ref ClaraSubnetA
+            - !Ref ClaraSubnetB
+          SecurityGroups:
+            - !Ref ClaraSecurityGroup
+      LoadBalancers:
+        - ContainerName: clara-frontend
+          ContainerPort: 3000
+          TargetGroupArn: !Ref ClaraFrontendTargetGroup
+
+Outputs:
+  ECSClusterName:
+    Value: !Ref ClaraECSCluster
+  LoadBalancerDNS:
+    Value: !GetAtt ClaraALB.DNSName
+    Description: URL of the Application Load Balancer
+  Stage:
+    Value: !Ref Stage

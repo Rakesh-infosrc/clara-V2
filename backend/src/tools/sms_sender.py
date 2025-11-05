@@ -114,7 +114,6 @@ def send_sms_via_sns(
 
     if not include_reserved_attributes:
         attributes["SMSType"] = resolved_type
-
     try:
         response = client.publish(
             PhoneNumber=to_number,

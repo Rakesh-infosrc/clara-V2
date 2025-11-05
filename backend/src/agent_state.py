@@ -21,7 +21,7 @@ wake_word = "hey clara"  # English fallback for external integrations
 sleep_phrase = "go idle"
 last_activity = time.time()  # Track last interaction
 preferred_language = DEFAULT_LANGUAGE
-AUTO_SLEEP_TIMEOUT = 180  # 3 minutes of inactivity = auto sleep
+AUTO_SLEEP_TIMEOUT = 600  # 10 minutes of inactivity = auto sleep
 
 # -------------------- Shared State File --------------------
 STATE_FILE = Path(__file__).parent.parent / "data" / "agent_state.json"
@@ -30,6 +30,16 @@ STATE_FILE = Path(__file__).parent.parent / "data" / "agent_state.json"
 is_verified = False  # Track if user is verified (face or manual)
 verified_user_name = None  # Store verified user's name
 verified_user_id = None  # Store verified user's employee ID
+
+def _emit_idle_signal(reason: str) -> None:
+    """Notify frontend to stop camera capture when agent idles"""
+    try:
+        from flow_signal import post_signal
+
+        post_signal("stop_face_capture", {"reason": reason})
+    except Exception as signal_err:
+        print(f"Warning: could not emit idle signal ({reason}): {signal_err}")
+
 
 def wake_up():
     """Wake up Clara from sleep state"""
@@ -42,6 +52,7 @@ def go_to_sleep():
     """Put Clara to sleep state"""
     global is_awake
     is_awake = False
+    _emit_idle_signal("manual_sleep")
     return get_message("sleep_ack", get_preferred_language())
 
 def save_state_to_file():
@@ -92,6 +103,7 @@ def check_auto_sleep():
     global is_awake, last_activity
     if is_awake and (time.time() - last_activity) > AUTO_SLEEP_TIMEOUT:
         is_awake = False
+        _emit_idle_signal("auto_sleep")
         return get_message("auto_sleep_notice", get_preferred_language())
     return None
 

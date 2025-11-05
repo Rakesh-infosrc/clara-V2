@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
-    "start": "next start",
+    "start": "pnpm dlx serve out -l 3003",
+    "postbuild": "node ./scripts/ensure-routes-manifest.mjs",
     "lint": "next lint",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

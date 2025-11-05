@@ -162,21 +162,27 @@ async def log_and_notify_visitor(
 
         # Lookup employee contact details from DynamoDB
         employee_record = get_employee_by_name(meeting_employee)
-        if not employee_record:
-            return f"❌ Employee '{meeting_employee}' not found in records."
+        host_lookup_error: str | None = None
 
-        raw_employee = employee_record.get("raw") or {}
-        emp_email = (employee_record.get("email") or raw_employee.get("email") or "").strip()
-        emp_phone = (employee_record.get("phone") or raw_employee.get("phone") or raw_employee.get("mobile") or "").strip()
-        emp_id = employee_record.get("employee_id") or raw_employee.get("employee_id") or raw_employee.get("id")
+        if not employee_record:
+            raw_employee = {}
+            emp_email = ""
+            emp_phone = ""
+            emp_id = None
+            host_lookup_error = f"Host '{meeting_employee}' not found in employee records."
+        else:
+            raw_employee = employee_record.get("raw") or {}
+            emp_email = (employee_record.get("email") or raw_employee.get("email") or "").strip()
+            emp_phone = (employee_record.get("phone") or raw_employee.get("phone") or raw_employee.get("mobile") or "").strip()
+            emp_id = employee_record.get("employee_id") or raw_employee.get("employee_id") or raw_employee.get("id")
 
         notification_sent = False
-        notification_error: str | None = None
+        notification_error: str | None = host_lookup_error
         notification_method: str | None = None
         notification_sid: str | None = None
         teams_error: str | None = None
 
-        if not emp_email:
+        if not emp_email and not host_lookup_error:
             notification_error = "Host email not found."
 
         if photo_captured and photo_location:
@@ -210,27 +216,26 @@ async def log_and_notify_visitor(
             except RuntimeError as sms_error:
                 notification_error = f"SMS notification failed: {sms_error}"
 
-        if not notification_sent:
+        if not notification_sent and emp_email:
             # SMS missing or failed; try email when we have one
-            if emp_email:
-                from .email_sender import send_email_via_gmail
+            from .email_sender import send_email_via_gmail
 
-                try:
-                    send_email_via_gmail(
-                        to_email=emp_email,
-                        subject=f"Visitor {visitor_name} is waiting at reception",
-                        body=message_text,
-                    )
-                    notification_sent = True
-                    notification_method = "email"
-                except RuntimeError as email_error:
-                    combined = f"Email notification failed: {email_error}"
-                    if notification_error:
-                        notification_error = f"{notification_error}; {combined}"
-                    else:
-                        notification_error = combined
-            elif not notification_error:
-                notification_error = "No phone or email available for host notification"
+            try:
+                send_email_via_gmail(
+                    to_email=emp_email,
+                    subject=f"Visitor {visitor_name} is waiting at reception",
+                    body=message_text,
+                )
+                notification_sent = True
+                notification_method = "email"
+            except RuntimeError as email_error:
+                combined = f"Email notification failed: {email_error}"
+                if notification_error:
+                    notification_error = f"{notification_error}; {combined}"
+                else:
+                    notification_error = combined
+        elif not notification_sent and not notification_error:
+            notification_error = "No phone or email available for host notification"
 
         if notification_sent:
             print(
@@ -270,6 +275,7 @@ async def log_and_notify_visitor(
             "local_timestamp": timestamp,
             "photo_location": photo_location,
             "teams_error": teams_error,
+            "host_lookup_error": host_lookup_error,
         }
         metadata = {k: v for k, v in metadata_raw.items() if v not in (None, "")}
 
@@ -287,7 +293,12 @@ async def log_and_notify_visitor(
                 "⚠️ Visitor logged locally and email sent, but failed to persist log to DynamoDB."
             )
         if notification_sent:
-            return f"✅ Visitor {visitor_name} logged and {meeting_employee} has been notified via email."
+            return f"✅ Visitor {visitor_name} logged and {meeting_employee} has been notified via {notification_method}."
+        if host_lookup_error:
+            return (
+                f"⚠️ Visitor {visitor_name} logged, but I couldn't find contact details for {meeting_employee}. "
+                "I've recorded the visit so the team can follow up manually."
+            )
         if notification_error:
             return f"⚠️ Visitor {visitor_name} logged but notification not sent: {notification_error}"
         return f"✅ Visitor {visitor_name} logged."

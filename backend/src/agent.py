@@ -106,7 +106,9 @@ from tools import (
     check_face_registration_status,
     capture_visitor_photo,
     get_visitor_log,
-    search_web
+    search_web,
+    face_verify,
+    run_face_verify
 )
 from agent_state import verified_user_name, verified_user_id
 from flow_manager import flow_manager, FlowState, UserType
@@ -132,17 +134,35 @@ async def start_reception_flow():
 @function_tool
 async def classify_user_type(user_input: str):
     """Classify user as employee or visitor based on their input"""
-    success, message, next_state = flow_manager.process_user_classification(user_input)
-   
-    # If user classified as employee and moved to face recognition state, signal frontend
-    if success and next_state and next_state.value == "face_recognition":
-        from flow_signal import post_signal
-        post_signal("start_face_capture", {
-            "message": "Please show your face to the camera for employee verification",
-            "next_endpoint": "/flow/face_recognition"
-        })
-   
-    return message
+    try:
+        import os
+        import requests
+
+        backend_url = os.getenv("BACKEND_URL", "http://clara-alb-dev-926087638.us-east-1.elb.amazonaws.com")
+        print(f"🌐 [Agent] classify_user_type -> {backend_url}/flow/classify_user")
+        response = requests.post(
+            f"{backend_url}/flow/classify_user",
+            json={"user_input": user_input},
+            timeout=5,
+        )
+
+        if response.ok:
+            data = response.json()
+            message = data.get("response") or data.get("message") or ""
+            success = data.get("success", False)
+            next_state = data.get("next_state")
+            print(f"✅ [Agent] classify_user_type success={success}, next_state={next_state}")
+            if success:
+                # Backend is authoritative for posting signals; just return the message
+                return message or "Classification updated."
+            print(f"❌ [Agent] Classification failed via API: {message}")
+            return message or "I'm still figuring out if you're an employee or a visitor."
+
+        print(f"⚠️ [Agent] classify_user_type HTTP {response.status_code}: {response.text}")
+    except Exception as exc:
+        print(f"⚠️ [Agent] classify_user_type error: {exc}")
+
+    return "I'm having trouble classifying right now. Could you repeat that?"
  
 @function_tool
 async def process_face_recognition(face_result_status: str, employee_name: str = None, employee_id: str = None):
@@ -150,7 +170,7 @@ async def process_face_recognition(face_result_status: str, employee_name: str =
     try:
         # If no specific results provided, this suggests we should tell the user to use face recognition
         if not face_result_status or face_result_status == "pending":
-            return "Please show your face to the camera for recognition. The system will automatically verify your identity."
+            return "Please tap the Employee Mode button to proceed. I'll start your verification automatically."
        
         # If face recognition succeeded but no employee data provided, try to reuse active session (never cached state)
         if face_result_status == "success" and not employee_name and not employee_id:
@@ -177,31 +197,35 @@ async def trigger_face_recognition():
     try:
         session = flow_manager.get_current_session()
         if not session:
-            flow_manager.create_session()
-            session = flow_manager.get_current_session()
+            return "Let's start by waking up Clara with 'Hey Clara' and telling me if you're an employee or visitor."
 
-        if session:
-            if session.is_verified:
-                return "You're already verified. How else may I assist you today?"
-            if session.user_type == UserType.UNKNOWN:
-                session.user_type = UserType.EMPLOYEE
-            session.current_state = FlowState.FACE_RECOGNITION
-            session.last_activity = time.time()
-            flow_manager.save_sessions()
+        if session.is_verified:
+            return "You're already verified. How else may I assist you today?"
+
+        if session.user_type != UserType.EMPLOYEE:
+            return "Before we scan, please let me know if you're an employee or a visitor."
+
+        if session.current_state != FlowState.FACE_RECOGNITION:
+            return "I need to confirm you're an employee first. Please say something like 'I'm an employee'."
+
+        session.last_activity = time.time()
+        flow_manager.save_sessions()
     except Exception as exc:
-        print(f"[WARN] trigger_face_recognition could not sync flow state: {exc}")
+        print(f"[WARN] trigger_face_recognition state validation failed: {exc}")
+        return "Let's first confirm whether you're an employee or visitor before using face recognition."
 
     try:
         from flow_signal import post_signal
 
         post_signal("start_face_capture", {
-            "message": "Please show your face to the camera for employee verification",
+            "message": "Please tap the Employee Mode button to proceed.",
             "next_endpoint": "/flow/face_recognition",
         })
     except Exception as exc:
         print(f"[WARN] trigger_face_recognition could not emit signal: {exc}")
+        return "I'm having trouble starting the face scan. Let's try again after confirming you're an employee."
 
-    return "Please show your face to the camera now. I'll verify your identity automatically using our secure face recognition system."
+    return "Please tap the Employee Mode button to proceed. I'll verify your identity automatically once you enable it."
  
 @function_tool
 async def verify_employee_credentials(
@@ -328,7 +352,7 @@ async def get_flow_help():
     help_messages = {
         FlowState.IDLE: "Say 'Hey Clara' to wake me up and start the process.",
         FlowState.USER_CLASSIFICATION: "Please tell me if you are an Employee or a Visitor.",
-        FlowState.FACE_RECOGNITION: "Please show your face to the camera for recognition.",
+        FlowState.FACE_RECOGNITION: "Please tap the Employee Mode button to continue with verification.",
         FlowState.MANUAL_VERIFICATION: "Please provide your name and employee ID for verification.",
         FlowState.CREDENTIAL_CHECK: "Would you like to register your face for faster access next time?",
         FlowState.FACE_REGISTRATION: "Please look at the camera to register your face.",
@@ -358,6 +382,41 @@ async def sync_verification_status():
             return f"✅ Verification synchronized. Welcome {employee_name}! You have full access."
    
     return "No verified user found in current session."
+
+@function_tool
+async def get_company_information(query: str = "general"):
+    """
+    Get comprehensive company information from our database.
+    Use this for any questions about the company, services, or general information.
+    
+    Args:
+        query: The specific information requested (e.g., 'services', 'contact', 'about', 'location')
+    """
+    try:
+        # First try to get company info from PDF
+        from tools.company_info import company_info
+        result = await company_info(None, query)
+        
+        # If company info is not available, try web search as backup
+        if "unable to access" in result.lower() or "technical difficulties" in result.lower():
+            try:
+                from tools.web_search import search_web
+                search_query = f"Info Services company information {query}" if query != "general" else "Info Services company"
+                web_result = await search_web(None, search_query)
+                return f"I couldn't access our internal company database, but here's what I found online:\n\n{web_result}"
+            except Exception as web_error:
+                return (
+                    "I'm currently unable to access company information right now. "
+                    "Let me know if you'd like me to connect you with a human teammate or provide alternative resources."
+                )
+        
+        return result
+        
+    except Exception as e:
+        return (
+            "I'm experiencing technical difficulties retrieving company information. "
+            f"I've logged the issue and can involve a human teammate if needed. Error: {str(e)}"
+        )
  
  
 # -------------------------
@@ -380,9 +439,9 @@ You are Clara, a WAKE WORD ACTIVATED virtual receptionist.
  
 FLOW SEQUENCE AFTER WAKE UP:
 1. Wake Word: "Hey Clara" → use start_reception_flow() → ask employee/visitor question
-2. Employee Classification: "I am employee" → use trigger_face_recognition() → face scan
-3. Visitor Classification: "I am visitor" → use collect_visitor_info() → gather details
-4. Face Recognition: Only happens AFTER employee classification
+2. Employee Classification: "I am employee" → use classify_user_type("I am employee") → automatically triggers face scan
+3. Visitor Classification: "I am visitor" → use classify_user_type("I am visitor") → collect visitor info
+4. Face Recognition: Automatically triggered after employee classification
 5. Manual Verification: If face fails, use verify_employee_credentials()
 6. Session End: Use end_current_session() when complete
  
@@ -397,6 +456,18 @@ VERIFICATION RULES:
 - Visitors get limited access and host assistance
 - Always verify identity before providing company information
 - Use check_user_verification() to check current status
+
+🏢 COMPANY INFORMATION HANDLING:
+- When users ask about company info, services, or general questions → ALWAYS use company_info() tool first
+- Common triggers: "company information", "about company", "services", "what do you do", "tell me about"
+- If company_info fails or is unavailable → use search_web() as backup
+- For specific searches, pass the query to company_info(query="user's question")
+- Always prioritize company PDF data over web search results
+
+📞 INFORMATION ACCESS PRIORITY:
+1. First: Use company_info() tool for any company-related questions
+2. Second: If company info unavailable, use search_web() tool  
+3. Third: Provide helpful guidance to contact reception
  
 STATE MANAGEMENT:
 - Sleep: Only respond to "Hey Clara"
@@ -425,6 +496,8 @@ STATE MANAGEMENT:
             cleanup_old_sessions,
             get_flow_help,
             sync_verification_status,
+            # Enhanced company information tool
+            get_company_information,
             # Core business tools  
             company_info,
             get_employee_details,
@@ -436,6 +509,8 @@ STATE MANAGEMENT:
             # Face registration tools
             register_employee_face,
             check_face_registration_status,
+            # Face verification tools
+            face_verify,
             # Enhanced visitor tools
             capture_visitor_photo,
             get_visitor_log,
@@ -507,12 +582,41 @@ STATE MANAGEMENT:
             # Provide context-aware responses based on current flow state
             if session.current_state == FlowState.USER_CLASSIFICATION:
                 print(f"🔍 In USER_CLASSIFICATION state, processing: '{text_content}'")
+                
+                # Call backend API for classification to ensure shared state
+                try:
+                    import requests
+                    import os
+                    # Try internal service discovery first, then fall back to ALB
+                    backend_url = os.getenv("BACKEND_URL", "http://clara-alb-dev-926087638.us-east-1.elb.amazonaws.com")
+                    print(f"🌐 Calling backend API at: {backend_url}/flow/classify_user")
+                    classify_response = requests.post(
+                        f"{backend_url}/flow/classify_user",
+                        json={"user_input": text_content},
+                        timeout=5
+                    )
+                    if classify_response.ok:
+                        classify_data = classify_response.json()
+                        success = classify_data.get("success", False)
+                        response = classify_data.get("response", "")
+                        if success:
+                            print(f"✅ Classification successful via API: '{response}'")
+                            return response
+                        else:
+                            print(f"❌ Classification failed via API: '{response}'")
+                            return response
+                    else:
+                        print(f"⚠️ Backend API call failed, falling back to local flow_manager")
+                except Exception as e:
+                    print(f"⚠️ Error calling backend API: {e}, falling back to local flow_manager")
+                
+                # Fallback to local flow_manager if API call fails
                 success, response, next_state = flow_manager.process_user_classification(text_content)
                 if success:
-                    print(f"✅ Classification successful: '{response}', next_state: {next_state.value}")
+                    print(f"✅ Classification successful (fallback): '{response}', next_state: {next_state.value}")
                     return response
                 else:
-                    print(f"❌ Classification failed: '{response}', staying in {session.current_state.value}")
+                    print(f"❌ Classification failed (fallback): '{response}', staying in {session.current_state.value}")
                     return response
         
         # Context-aware fallback so we never send 'None' and keep a human feel

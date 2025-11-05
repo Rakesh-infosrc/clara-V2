@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manager Visit Log - Clara Admin</title>
+    <link rel="icon" type="image/png" href="assets/favicon.ico">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-brand">
+                <img src="assets/company-logo.png" alt="Company Logo" class="header-logo">
+                <h1>Manager Visit Log</h1>
+            </div>
+            <p>Manage and track manager visits to your organization</p>
+        </div>
+
+        <div class="glass-card">
+            <div class="config-section">
+                <h3>⚙️ AWS Configuration</h3>
+                <div class="form-section">
+                    <div class="form-group">
+                        <label for="awsRegion">AWS Region</label>
+                        <input type="text" id="awsRegion" value="us-east-1" placeholder="e.g., us-east-1">
+                    </div>
+                    <div class="form-group">
+                        <label for="tableName">DynamoDB Table Name</label>
+                        <input type="text" id="tableName" value="Clara_manager_visits" placeholder="Table name">
+                    </div>
+                    <div class="form-group">
+                        <label for="accessKeyId">AWS Access Key ID</label>
+                        <input type="password" id="accessKeyId" placeholder="Your AWS Access Key">
+                    </div>
+                    <div class="form-group">
+                        <label for="secretAccessKey">AWS Secret Access Key</label>
+                        <input type="password" id="secretAccessKey" placeholder="Your AWS Secret Key">
+                    </div>
+                </div>
+                <button class="btn-success" onclick="initializeAWS()">Connect to DynamoDB</button>
+            </div>
+        </div>
+
+        <div id="messageContainer"></div>
+
+        <div class="glass-card">
+            <h2 class="section-title">📝 Add/Edit Manager Visit</h2>
+            <form id="visitForm">
+                <div class="form-section">
+                    <div class="form-group">
+                        <label for="employeeId">Employee ID *</label>
+                        <input type="text" id="employeeId" required placeholder="e.g., 1307">
+                    </div>
+                    <div class="form-group">
+                        <label for="visitDate">Visit Date *</label>
+                        <input type="date" id="visitDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="managerName">Manager Name</label>
+                        <input type="text" id="managerName" placeholder="e.g., Rakesh Reddy">
+                    </div>
+                    <div class="form-group">
+                        <label for="office">Office Location</label>
+                        <input type="text" id="office" placeholder="e.g., Chennai">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" placeholder="Additional notes about the visit..."></textarea>
+                </div>
+                <div class="btn-group">
+                    <button type="submit" class="btn-primary">💾 Save Visit</button>
+                    <button type="button" class="btn-secondary" onclick="clearForm()">🔄 Clear Form</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="glass-card">
+            <div class="glass-card__header">
+                <h2 class="section-title">📊 Manager Visits</h2>
+                <button class="btn-success" onclick="loadVisits()">🔄 Refresh</button>
+            </div>
+            <div class="table-container">
+                <table id="visitsTable">
+                    <thead>
+                        <tr>
+                            <th>Employee ID</th>
+                            <th>Visit Date</th>
+                            <th>Manager Name</th>
+                            <th>Office</th>
+                            <th>Notes</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="visitsTableBody">
+                        <tr>
+                            <td colspan="6" class="loading">Connect to DynamoDB to load visits...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.1000.0.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

@@ -59,10 +59,10 @@ MESSAGES = {
         "hi": "बहुत बढ़िया! मैं हिंदी में बात करूँगी। क्या आप कर्मचारी हैं या आगंतुक?\n(English) I'll speak Hindi. Are you an Employee or a Visitor?",
     },
     "classification_employee": {
-        "en": "Great! Please show your face to the camera for recognition.",
-        "ta": "சிறப்பாக இருக்கிறது! முகஅடையாளத்திற்காக கேமராவை நோக்கி பாருங்கள்.",
-        "te": "గ్రేట్! దయచేసి గుర్తింపుకోసం మీ ముఖం కెమెరాకు చూపండి.",
-        "hi": "बहुत बढ़िया! पहचान के लिए कृपया कैमरा की ओर देखें।",
+        "en": "Great! Please tap the Employee Mode button, then look at the camera for verification.",
+        "ta": "சிறப்பாக இருக்கிறது! Employee Mode பொத்தானை தட்டி, பின்னர் சரிபார்ப்புக்காக கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "గ్రేట్! దయచేసి Employee Mode బటన్‌ను ట్యాప్ చేసి, నిర్ధారణ కోసం కెమెరా వైపు చూడండి.",
+        "hi": "बहुत बढ़िया! कृपया Employee Mode बटन टैप करें और फिर सत्यापन के लिए कैमरे की ओर देखें।",
     },
     "classification_visitor": {
         "en": "Welcome! Please provide your name, phone number, purpose of visit, and who you're meeting.",
@@ -71,10 +71,10 @@ MESSAGES = {
         "hi": "स्वागत है! कृपया अपना नाम, फ़ोन नंबर, आने का उद्देश्य और किससे मिलने आए हैं बताइए।",
     },
     "flow_face_recognition_prompt": {
-        "en": "I'm ready when you are — please look at the camera for a quick scan.",
-        "ta": "நான் தயார். தயவுசெய்து முகஅடையாளத்திற்காக கேமராவை நோக்கிப் பாருங்கள்.",
-        "te": "నేను సిద్ధంగా ఉన్నాను — — దయచేసి త్వరిత స్కాన్ కోసం కెమెరా వైపు చూడండి.",
-        "hi": "मैं तैयार हूँ — कृपया त्वरित स्कैन के लिए कैमरे की ओर देखें।",
+        "en": "Tap the Employee Mode button and face the camera so I can start your verification.",
+        "ta": "Employee Mode பொத்தானை தட்டி, சரிபார்ப்பைத் தொடங்க நான் கேமராவை நோக்கிப் பாருங்கள்.",
+        "te": "మీ ధృవీకరణను ప్రారంభించేందుకు Employee Mode బటన్‌ను ట్యాప్ చేసి కెమెరా వైపు చూడండి.",
+        "hi": "कृपया Employee Mode बटन टैप करके कैमरे की ओर देखें ताकि मैं आपका सत्यापन शुरू कर सकूँ।",
     },
     "flow_manual_verification_prompt": {
         "en": "Please share your name and employee ID. If you received an OTP, tell me now.",
@@ -275,10 +275,10 @@ MESSAGES = {
         "hi": "❌ इस समय मौसम जानकारी प्राप्त नहीं कर पा रही हूँ।",
     },
     "start_face_capture": {
-        "en": "Please show your face to the camera for recognition.",
-        "ta": "முகஅடையாளத்திற்காக தயவுசெய்து கேமராவை நோக்கி பாருங்கள்.",
-        "te": "రికగ్నిషన్ కోసం మీ ముఖాన్ని కెమెరాకు చూపండి.",
-        "hi": "पहचान के लिए कृपया कैमरा की ओर देखें।",
+        "en": "Please tap the Employee Mode button to proceed.",
+        "ta": "தொடர்வதற்காக Employee Mode பொத்தானை தட்டவும்.",
+        "te": "కొనసాగేందుకు Employee Mode బటన్‌ను ట్యాప్ చేయండి.",
+        "hi": "आगे बढ़ने के लिए कृपया Employee Mode बटन टैप करें।",
     },
     "start_visitor_info": {
         "en": "Please enter your name, phone number, purpose, and who you're meeting.",
@@ -390,14 +390,19 @@ def detect_language_from_text(text: str | None) -> str | None:
     if not text:
         return None
 
+    script_counts = {"ta": 0, "te": 0, "hi": 0}
     for ch in text:
         code_point = ord(ch)
         if 0x0B80 <= code_point <= 0x0BFF:
-            return "ta"
-        if 0x0C00 <= code_point <= 0x0C7F:
-            return "te"
-        if 0x0900 <= code_point <= 0x097F:
-            return "hi"
+            script_counts["ta"] += 1
+        elif 0x0C00 <= code_point <= 0x0C7F:
+            script_counts["te"] += 1
+        elif 0x0900 <= code_point <= 0x097F:
+            script_counts["hi"] += 1
+
+    for code, count in script_counts.items():
+        if count >= 2:
+            return code
 
     normalized = text.lower().strip()
     if not normalized:

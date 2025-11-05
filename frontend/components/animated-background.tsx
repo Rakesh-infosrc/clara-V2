@@ -60,13 +60,24 @@ const AnimatedBackground = () => {
           inset: 0;
           z-index: 0;
           overflow: hidden;
-          background: radial-gradient(circle at center, rgba(8, 19, 36, 0.4) 0%, rgba(3, 6, 12, 0.95) 65%, rgba(1, 2, 5, 1) 100%);
+          background: radial-gradient(
+            circle at center,
+            rgba(8, 19, 36, 0.4) 0%,
+            rgba(3, 6, 12, 0.95) 65%,
+            rgba(1, 2, 5, 1) 100%
+          );
         }
 
         .animated-background__texture {
           position: absolute;
           inset: -20%;
-          background: radial-gradient(circle at center, rgba(23, 102, 165, 0.35) 0%, rgba(18, 84, 122, 0.25) 28%, rgba(8, 20, 40, 0.15) 65%, rgba(2, 6, 12, 0) 100%);
+          background: radial-gradient(
+            circle at center,
+            rgba(23, 102, 165, 0.35) 0%,
+            rgba(18, 84, 122, 0.25) 28%,
+            rgba(8, 20, 40, 0.15) 65%,
+            rgba(2, 6, 12, 0) 100%
+          );
           filter: blur(18px);
           opacity: 0.6;
           transform: scale(1.05);
@@ -75,7 +86,12 @@ const AnimatedBackground = () => {
         .animated-background__vignette {
           position: absolute;
           inset: 0;
-          background: radial-gradient(circle at center, rgba(6, 36, 61, 0.2) 0%, rgba(3, 9, 18, 0.92) 72%, rgba(2, 4, 8, 1) 100%);
+          background: radial-gradient(
+            circle at center,
+            rgba(6, 36, 61, 0.2) 0%,
+            rgba(3, 9, 18, 0.92) 72%,
+            rgba(2, 4, 8, 1) 100%
+          );
           mix-blend-mode: screen;
           opacity: 0.75;
           backdrop-filter: blur(6px);
@@ -87,7 +103,13 @@ const AnimatedBackground = () => {
           height: 4px;
           border-radius: 999px;
           opacity: 0;
-          background: linear-gradient(90deg, rgba(14, 165, 233, 0) 0%, rgba(56, 189, 248, 0.6) 40%, rgba(16, 185, 129, 0.9) 60%, rgba(59, 130, 246, 0) 100%);
+          background: linear-gradient(
+            90deg,
+            rgba(14, 165, 233, 0) 0%,
+            rgba(56, 189, 248, 0.6) 40%,
+            rgba(16, 185, 129, 0.9) 60%,
+            rgba(59, 130, 246, 0) 100%
+          );
           filter: blur(2px);
           animation-name: twinkle;
           animation-timing-function: ease-in-out;

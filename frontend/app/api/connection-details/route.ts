@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { AccessToken, type AccessTokenOptions, type VideoGrant } from 'livekit-server-sdk';
-import { RoomConfiguration } from '@livekit/protocol';
 
 // NOTE: you are expected to define the following environment variables in `.env.local`:
 const API_KEY = process.env.LIVEKIT_API_KEY;
@@ -17,7 +16,7 @@ export type ConnectionDetails = {
   participantToken: string;
 };
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
     if (LIVEKIT_URL === undefined) {
       throw new Error('LIVEKIT_URL is not defined');
@@ -29,12 +28,10 @@ export async function POST(req: Request) {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
-    // Parse agent configuration from request body
-    const body = await req.json();
     // Generate participant token with FIXED room name for agent matching
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
-    const roomName = 'Clara-room';  // Fixed room name that agent can join
+    const roomName = 'Clara-room'; // Fixed room name that agent can join
 
     const participantToken = await createParticipantToken(
       { identity: participantIdentity, name: participantName },
@@ -50,6 +47,7 @@ export async function POST(req: Request) {
     };
     const headers = new Headers({
       'Cache-Control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
     });
     return NextResponse.json(data, { headers });
   } catch (error) {
@@ -60,10 +58,7 @@ export async function POST(req: Request) {
   }
 }
 
-function createParticipantToken(
-  userInfo: AccessTokenOptions,
-  roomName: string
-): Promise<string> {
+function createParticipantToken(userInfo: AccessTokenOptions, roomName: string): Promise<string> {
   const at = new AccessToken(API_KEY, API_SECRET, {
     ...userInfo,
     ttl: '15m',

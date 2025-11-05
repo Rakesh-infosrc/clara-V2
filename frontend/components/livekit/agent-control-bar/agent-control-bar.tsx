@@ -13,11 +13,10 @@ import { cn } from '@/lib/utils';
 import { DeviceSelect } from '../device-select';
 import { TrackToggle } from '../track-toggle';
 import { UseAgentControlBarProps, useAgentControlBar } from './hooks/use-agent-control-bar';
-import ModernBarVisualizer from './ModernBarVisualizer';
 
 export interface AgentControlBarProps
   extends React.HTMLAttributes<HTMLDivElement>,
-  UseAgentControlBarProps {
+    UseAgentControlBarProps {
   capabilities: Pick<AppConfig, 'supportsChatInput' | 'supportsVideoInput' | 'supportsScreenShare'>;
   onChatOpenChange?: (open: boolean) => void;
   onSendMessage?: (message: string) => Promise<void>;
@@ -54,7 +53,6 @@ export function AgentControlBar({
     microphoneToggle,
     screenShareToggle,
     handleAudioDeviceChange,
-    handleVideoDeviceChange,
     handleDisconnect,
   } = useAgentControlBar({
     controls,
@@ -87,15 +85,8 @@ export function AgentControlBar({
     },
     [onDeviceError]
   );
-  const onCameraDeviceSelectError = useCallback(
-    (error: Error) => {
-      onDeviceError?.({ source: Track.Source.Camera, error });
-    },
-    [onDeviceError]
-  );
 
   // LiveKit camera-based face capture disabled; VideoCapture component handles face scanning
-
 
   return (
     <div
@@ -167,7 +158,6 @@ export function AgentControlBar({
           )}
 
           {/* LiveKit camera toggle disabled; VideoCapture handles all camera input */}
-
 
           {capabilities.supportsScreenShare && visibleControls.screenShare && (
             <div className="flex items-center gap-0">

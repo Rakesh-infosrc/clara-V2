@@ -10,9 +10,9 @@ export const APP_CONFIG_DEFAULTS: AppConfig = {
   supportsScreenShare: true,
   isPreConnectBufferEnabled: true,
 
-  logo: '/InfoServices-Logo.svg',
+  logo: 'InfoServices-Logo.svg',
   accent: '#002cf2',
-  logoDark: '/InfoServices-Logo.svg',
+  logoDark: 'InfoServices-Logo.svg',
   accentDark: '#1fd5f9',
   startButtonText: 'Talk To Clara',
 

@@ -139,11 +139,17 @@ def _get_employee_name(employee_id: str) -> str | None:
     name: str | None = None
 
     try:
+        print(f"🔍 Looking up employee ID: {key} in DynamoDB")
         record = get_employee_by_id(key)
         if record:
             candidate = (record.get("name") or record.get("employee_id") or "").strip()
             if candidate:
                 name = candidate
+                print(f"✅ Found employee: {name} for ID: {key}")
+            else:
+                print(f"⚠️ Employee record found but no name for ID: {key}")
+        else:
+            print(f"❌ No employee record found for ID: {key}")
     except Exception as exc:
         print(f"[FaceRecognition] DynamoDB lookup failed for {key}: {exc}")
 
@@ -242,8 +248,18 @@ def run_face_verify(image_bytes: bytes):
 
         encoding_data = get_face_encoding_data()
         if not encoding_data:
-            return {"status": "error", "message": "Face database is unavailable"}
+            print("❌ Face database is unavailable - no S3 data found")
+            print(f"S3 Bucket: {os.getenv('FACE_S3_BUCKET', 'NOT SET')}")
+            print(f"S3 Key: {os.getenv('FACE_ENCODING_S3_KEY', 'NOT SET')}")
+            return {
+                "status": "not_recognized", 
+                "message": "Face recognition system is not configured yet. Please provide your name and employee ID for manual verification.",
+                "requiresManualVerification": True
+            }
 
+        print(f"✅ Face database loaded successfully!")
+        print(f"Data keys: {list(encoding_data.keys())}")
+        
         known_encodings = encoding_data.get("encodings", [])
         known_ids = (
             encoding_data.get("employee_ids")
@@ -251,10 +267,17 @@ def run_face_verify(image_bytes: bytes):
             or encoding_data.get("names")
             or []
         )
-        print(f"Loaded {len(known_encodings)} encodings and {len(known_ids)} IDs")
+        print(f"📊 Loaded {len(known_encodings)} encodings and {len(known_ids)} IDs")
+        if known_ids:
+            print(f"👥 Employee IDs in database: {known_ids[:5]}{'...' if len(known_ids) > 5 else ''}")
 
         if not known_encodings or not known_ids:
-            return {"status": "error", "message": "Face database is empty"}
+            print("Face database is empty - no registered faces")
+            return {
+                "status": "not_recognized", 
+                "message": "No faces have been registered yet. Please provide your name and employee ID for manual verification, and I can help you register your face for future use.",
+                "requiresManualVerification": True
+            }
 
         # Encode faces
         encodings = face_recognition.face_encodings(np_image)
@@ -293,32 +316,39 @@ def run_face_verify(image_bytes: bytes):
                 if other_distances:
                     second_best = min(other_distances)
                     confidence_gap = second_best - best_distance
-                    print(f"Confidence gap: {confidence_gap} (preferred: >{min_confidence_gap})")
-
-                # Accept match if either gap is healthy or the best distance is very confident on its own
-                gap_confident = confidence_gap is None or confidence_gap >= min_confidence_gap
-                distance_confident = best_distance <= (security_threshold - 0.03)
-
-                if gap_confident or distance_confident:
-                    emp_id = known_ids[best_match_index]
-                    emp_name = _get_employee_name(emp_id) or "Unknown"
-                    if not gap_confident:
-                        print("⚠️ Gap below preferred minimum but distance is confident; accepting match")
-                    print(f"✅ Face match accepted: {emp_name} ({emp_id}) with distance {best_distance}")
-                    otp_result = _dispatch_face_verification_otp(emp_id, emp_name)
+                    print(f"Confidence gap: {confidence_gap}")
+                
+                # Face matched! Get employee details
+                employee_id = known_ids[best_match_index]
+                print(f"✅ Face matched! Employee ID: {employee_id}")
+                
+                # Look up employee name from DynamoDB
+                employee_name = _get_employee_name(employee_id)
+                print(f"🔍 Employee name lookup result: {employee_name}")
+                
+                if employee_name:
+                    print(f"✅ Complete match: {employee_id} -> {employee_name}")
                     return {
                         "status": "success",
-                        "employeeId": emp_id,
-                        "name": emp_name,
-                        "otp": otp_result,
+                        "employeeId": employee_id,
+                        "name": employee_name,
+                        "message": f"Welcome back, {employee_name}!"
                     }
                 else:
-                    print("Confidence gap insufficient; rejecting match for safety")
-
-        print("❌ SECURITY: Face verification FAILED - No secure match found")
-        print(f"Best distance was: {best_distance if 'best_distance' in locals() else 'N/A'}")
-        print("Reason: Face does not meet strict security requirements")
-        return {"status": "error", "message": "Face not recognized - Security verification failed"}
+                    print(f"⚠️ Face recognized but no name found for ID: {employee_id}")
+                    return {
+                        "status": "success",
+                        "employeeId": employee_id,
+                        "name": f"Employee {employee_id}",
+                        "message": f"Face recognized (ID: {employee_id}), but employee details not found. Please contact HR."
+                    }
+        
+        print(f"❌ No face match found (best distance: {best_distance:.3f} > threshold: {security_threshold})")
+        return {
+            "status": "not_recognized", 
+            "message": "Face not recognized. Please provide your name and employee ID for manual verification.",
+            "requiresManualVerification": True
+        }
 
     except Exception as e:
         error_msg = f"SECURITY ERROR in verification {verification_id}: {str(e)}"

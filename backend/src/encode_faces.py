@@ -1,6 +1,7 @@
 import io
 import pickle
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
@@ -41,6 +42,20 @@ def _load_image_from_s3(client, bucket: str, key: str):
     return face_recognition.load_image_file(io.BytesIO(body))
 
 
+def _encode_single_key(client, bucket: str, key: str) -> tuple[str | None, bytes | None, str]:
+    try:
+        image = _load_image_from_s3(client, bucket, key)
+    except Exception as exc:  # pragma: no cover - defensive logging
+        return None, None, f"  ⚠ Failed to load {key}: {exc}"
+
+    encodings = face_recognition.face_encodings(image)
+    if not encodings:
+        return None, None, f"  ⚠ No face found in {key}"
+
+    employee_id = Path(key).stem
+    return employee_id, encodings[0], f"  ✔ Encoded Employee ID: {employee_id}"
+
+
 def main():
     image_bucket = FACE_IMAGE_BUCKET or FACE_S3_BUCKET
     if not image_bucket:
@@ -64,34 +79,55 @@ def main():
         print("⚠️ No employee images found in S3")
         return
 
-    known_encodings: list = []
-    known_ids: list[str] = []
+    filtered_keys: list[str] = []
+    seen_employee_ids: set[str] = set()
+    key_order: dict[str, int] = {}
 
-    for key in sorted(image_keys):
+    for index, key in enumerate(sorted(image_keys)):
         suffix = Path(key).suffix.lower()
         if allowed_exts and suffix not in allowed_exts:
             continue
-
-        try:
-            image = _load_image_from_s3(s3, image_bucket, key)
-        except Exception as exc:
-            print(f"  ⚠ Failed to load {key}: {exc}")
-            continue
-
-        encodings = face_recognition.face_encodings(image)
-        if not encodings:
-            print(f"  ⚠ No face found in {key}")
-            continue
-
-        encoding = encodings[0]
-        known_encodings.append(encoding)
         employee_id = Path(key).stem
-        known_ids.append(employee_id)
-        print(f"  ✔ Encoded Employee ID: {employee_id}")
+        if employee_id in seen_employee_ids:
+            continue
+        seen_employee_ids.add(employee_id)
+        filtered_keys.append(key)
+        key_order[key] = index
 
-    if not known_encodings:
+    if not filtered_keys:
+        print("⚠️ No employee images with supported formats found in S3")
+        return
+
+    max_workers = min(8, len(filtered_keys)) or 1
+    known_results: list[tuple[str, bytes]] = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(_encode_single_key, s3, image_bucket, key): key
+            for key in filtered_keys
+        }
+
+        for future in as_completed(future_map):
+            key = future_map[future]
+            try:
+                employee_id, encoding, message = future.result()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                print(f"  ⚠ Unexpected error processing {key}: {exc}")
+                continue
+
+            if message:
+                print(message)
+
+            if employee_id and encoding is not None:
+                known_results.append((employee_id, encoding))
+
+    if not known_results:
         print("⚠️ No face encodings were generated. Nothing to upload.")
         return
+
+    known_results.sort(key=lambda item: item[0])
+    known_ids = [employee_id for employee_id, _ in known_results]
+    known_encodings = [encoding for _, encoding in known_results]
 
     data = {"encodings": known_encodings, "employee_ids": known_ids}
     payload = pickle.dumps(data)

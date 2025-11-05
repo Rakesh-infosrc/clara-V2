@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Clara Virtual Receptionist &ndash; AWS Cost Management Report</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
+    body {
+      font-family: 'Poppins', 'Segoe UI', Tahoma, sans-serif;
+      margin: 40px;
+      color: #f3f4f6;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 {
+      color: #e0e7ff;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+    }
+
+    h1 {
+      font-weight: 700;
+      font-size: 2.8rem;
+      margin-bottom: 0.5rem;
+      letter-spacing: 1.5px;
+    }
+
+    h2 {
+      border-bottom: 2px solid #6366f1;
+      padding-bottom: 6px;
+      margin-top: 1.8rem;
+    }
+
+    p {
+      font-weight: 500;
+      color: #cbd5e1;
+      font-size: 1rem;
+      margin-top: 0;
+      margin-bottom: 12px;
+    }
+
+    table {
+      border-collapse: separate;
+      border-spacing: 0;
+      width: 100%;
+      margin-bottom: 32px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 50, 0.3);
+      background-color: #1e293b;
+    }
+
+    thead tr {
+      background: #4f46e5; /* Indigo-600 */
+    }
+
+    th, td {
+      padding: 14px 18px;
+      color: #e0e7ff;
+      vertical-align: top;
+      border-right: 1px solid rgba(255,255,255,0.1);
+      font-size: 0.95rem;
+    }
+
+    thead th:last-child,
+    tbody td:last-child {
+      border-right: none;
+    }
+
+    tbody tr:nth-child(even) {
+      background-color: #162447; /* navy-ish */
+    }
+
+    tbody tr:hover {
+      background-color: rgba(55,48,163,0.25); /* softened indigo with lower opacity */
+      color: #f8fafc;
+      transition: background-color 0.3s ease;
+    }
+
+    /* Tag style */
+    .tag {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 16px;
+      font-size: 12px;
+      background: #a5b4fc; /* indigo-300 */
+      color: #312e81;
+      font-weight: 600;
+      user-select: none;
+    }
+
+    ul {
+      margin-top: 0;
+      color: #cbd5e1;
+      font-size: 1rem;
+    }
+
+    footer {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-top: 48px;
+      text-align: center;
+      font-style: italic;
+    }
+
+    /* Editable cost inputs styling */
+    input[type="text"] {
+      width: 90px;
+      border-radius: 8px;
+      border: 1px solid #6366f1;
+      background-color: #272c4a;
+      color: #e0e7ff;
+      font-family: 'Poppins', sans-serif;
+      font-weight: 600;
+      font-size: 0.95rem;
+      padding: 5px 10px;
+      box-sizing: border-box;
+      text-align: right;
+      transition: border-color 0.3s ease, background-color 0.3s ease;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #a5b4fc;
+      background-color: #1e293b;
+      box-shadow: 0 0 6px #6366f1cc;
+    }
+
+    /* readonly styles for all other td except inputs */
+    td.static {
+      user-select: text;
+    }
+  </style>
+</head>
+<body>
+  <h1>Clara Virtual Receptionist &ndash; AWS Cost Management Report</h1>
+  <p><strong>Deployment model:</strong> Serverless (Lambda + API Gateway + DynamoDB + S3)</p>
+  <p><strong>Document date:</strong> 28 Oct 2025</p>
+
+  <h2>Service Cost Overview</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>Pricing Components</th>
+        <th>Example Month &mdash; Dev</th>
+        <th>Example Month &mdash; Light Prod</th>
+        <th>Optimisation &amp; Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="static">Lambda (FastAPI container)<br /><span class="tag">@Serverless.yml#142-210</span></td>
+        <td class="static">Requests ($0.20 / 1M) + duration ($0.0000166667 per GB&middot;s) beyond free tier (1M requests + 400k GB&middot;s)</td>
+        <td><input id="cost-lambda-dev" type="text" value="$0.00" aria-label="Lambda Dev cost" /></td>
+        <td><input id="cost-lambda-prod" type="text" value="$16.67" aria-label="Lambda Prod cost" /></td>
+        <td class="static">Right-size memory (512–1024 MB). Keep timeout tight. Use Provisioned Concurrency only if cold starts impact UX.</td>
+      </tr>
+      <tr>
+        <td class="static">API Gateway HTTP API<br /><span class="tag">@Serverless.yml#118-139</span></td>
+        <td class="static">$1.00 per million requests + data transfer</td>
+        <td><input id="cost-api-dev" type="text" value="$0.10" aria-label="API Gateway Dev cost" /></td>
+        <td><input id="cost-api-prod" type="text" value="$1.00" aria-label="API Gateway Prod cost" /></td>
+        <td class="static">HTTP API already chosen (cheaper than REST). Add caching only if chat traffic surges.</td>
+      </tr>
+      <tr>
+        <td class="static">DynamoDB tables (Employees, VisitorLog, ManagerVisit, FaceEncoding)<br /><span class="tag">@Serverless.yml#57-115</span></td>
+        <td class="static">On-demand read/write units + storage ($0.25 / GB)</td>
+        <td><input id="cost-ddb-dev" type="text" value="$2.40" aria-label="DynamoDB Dev cost" /></td>
+        <td><input id="cost-ddb-prod" type="text" value="$25.25" aria-label="DynamoDB Prod cost" /></td>
+        <td class="static">On-demand suits bursty workloads. Add TTL for flow sessions/OTP. If access is predictable, switch to provisioned + auto scaling.</td>
+      </tr>
+      <tr>
+        <td class="static">S3 &mdash; Face images<br /><span class="tag">@Serverless.yml#243-257</span></td>
+        <td class="static">Storage ($0.023 / GB) + PUT/GET ($0.005 / 1k)</td>
+        <td><input id="cost-s3-face-dev" type="text" value="$0.20" aria-label="S3 Face images Dev cost" /></td>
+        <td><input id="cost-s3-face-prod" type="text" value="$2.30" aria-label="S3 Face images Prod cost" /></td>
+        <td class="static">Client-side compress images. Lifecycle rule already 730 days — tighten to 180 if policy allows.</td>
+      </tr>
+      <tr>
+        <td class="static">S3 &mdash; Visitor photos<br /><span class="tag">@Serverless.yml#259-273</span></td>
+        <td class="static">Storage + request charges</td>
+        <td><input id="cost-s3-visitor-dev" type="text" value="$0.10" aria-label="S3 Visitor photos Dev cost" /></td>
+        <td><input id="cost-s3-visitor-prod" type="text" value="$1.15" aria-label="S3 Visitor photos Prod cost" /></td>
+        <td class="static">365-day expiry keeps cost low. Confirm retention requirements and adjust lifecycle accordingly.</td>
+      </tr>
+      <tr>
+        <td class="static">CloudWatch Logs<br /><span class="tag">@Serverless.yml#215-220</span></td>
+        <td class="static">$0.50 / GB ingested + $0.03 / GB-month stored</td>
+        <td><input id="cost-cwlogs-dev" type="text" value="$0.50" aria-label="CloudWatch Logs Dev cost" /></td>
+        <td><input id="cost-cwlogs-prod" type="text" value="$2.50" aria-label="CloudWatch Logs Prod cost" /></td>
+        <td class="static">Retention fixed at 14 days. Toggle DEBUG logging only when diagnosing issues.</td>
+      </tr>
+      <tr>
+        <td class="static">SNS (SMS notifications)<br /><span class="tag">@Serverless.yml#82-106</span></td>
+        <td class="static">Publish fee + carrier fee (location-specific)</td>
+        <td><input id="cost-sns-dev" type="text" value="$2.00" aria-label="SNS SMS Dev cost" /></td>
+        <td><input id="cost-sns-prod" type="text" value="$20.00" aria-label="SNS SMS Prod cost" /></td>
+        <td class="static">Use SES/email fallback when possible. Keep DLT template/entity IDs current to avoid rejection.</td>
+      </tr>
+      <tr>
+        <td class="static">SES (email notifications)<br /><span class="tag">@Serverless.yml#83-104</span></td>
+        <td class="static">$0.10 per 1k emails</td>
+        <td><input id="cost-ses-dev" type="text" value="$0.05" aria-label="SES Dev cost" /></td>
+        <td><input id="cost-ses-prod" type="text" value="$0.50" aria-label="SES Prod cost" /></td>
+        <td class="static">Prefer SES over Gmail for production throughput and auditability.</td>
+      </tr>
+      <tr>
+        <td class="static">CloudWatch X-Ray (Tracing)<br /><span class="tag">@Serverless.yml#43-53</span></td>
+        <td class="static">First 100k traces free, then $5 per million</td>
+        <td><input id="cost-xray-dev" type="text" value="$0.00" aria-label="X-Ray Dev cost" /></td>
+        <td><input id="cost-xray-prod" type="text" value="$2.00" aria-label="X-Ray Prod cost" /></td>
+        <td class="static">Disable tracing in dev if unnecessary. Sample traces (e.g., 10%) in prod.</td>
+      </tr>
+      <tr>
+        <td class="static">ECR (Lambda image storage)<br /><span class="tag">@Serverless.yml#17-40</span></td>
+        <td class="static">$0.10 per GB-month</td>
+        <td><input id="cost-ecr-dev" type="text" value="$0.20" aria-label="ECR Dev cost" /></td>
+        <td><input id="cost-ecr-prod" type="text" value="$0.50" aria-label="ECR Prod cost" /></td>
+        <td class="static">Apply lifecycle rules to prune unused tags. CI should clean intermediate builds.</td>
+      </tr>
+      <tr>
+        <td class="static">Data transfer out</td>
+        <td class="static">$0.09 per GB after the first GB</td>
+        <td><input id="cost-data-dev" type="text" value="$0.00" aria-label="Data transfer Dev cost" /></td>
+        <td><input id="cost-data-prod" type="text" value="$4.50" aria-label="Data transfer Prod cost" /></td>
+        <td class="static">Most media flows via LiveKit (external). Monitor API responses for large binary payloads.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Cost Management Recommendations</h2>
+  <ol>
+    <li><strong>Monitor Lambda usage</strong> &mdash; add CloudWatch dashboards and Budgets so unexpected retries or spikes are caught early.</li>
+    <li><strong>Keep media lean</strong> &mdash; compress face and visitor photos on the client; enforce API size limits to reduce S3 and Dynamo payloads.</li>
+    <li><strong>DynamoDB hygiene</strong> &mdash; enable TTL for flow sessions/OTP data; schedule clean-up tasks for legacy records.</li>
+    <li><strong>Notification mix</strong> &mdash; default to SES/email or Teams when practical to keep SMS fees down.</li>
+    <li><strong>Stage isolation</strong> &mdash; maintain separate budgets for dev vs. prod; restrict prod access and logging verbosity.</li>
+    <li><strong>Logging discipline</strong> &mdash; retain 14-day policy; ship long-term analytics to S3/Glacier if required instead of keeping in CloudWatch.</li>
+    <li><strong>IaC hygiene</strong> &mdash; remove unused/commented resources from the stack to avoid drift and unintentional deployments.</li>
+  </ol>
+
+  <footer>
+    Pricing based on AWS us-east-1 public rates as of Oct 2025. Use the AWS Pricing Calculator with live usage metrics for precise projections.
+  </footer>
+
+  <script>
+    // List of editable cost input IDs
+    const costInputs = [
+      'cost-lambda-dev', 'cost-lambda-prod',
+      'cost-api-dev', 'cost-api-prod',
+      'cost-ddb-dev', 'cost-ddb-prod',
+      'cost-s3-face-dev', 'cost-s3-face-prod',
+      'cost-s3-visitor-dev', 'cost-s3-visitor-prod',
+      'cost-cwlogs-dev', 'cost-cwlogs-prod',
+      'cost-sns-dev', 'cost-sns-prod',
+      'cost-ses-dev', 'cost-ses-prod',
+      'cost-xray-dev', 'cost-xray-prod',
+      'cost-ecr-dev', 'cost-ecr-prod',
+      'cost-data-dev', 'cost-data-prod'
+    ];
+
+    // Load saved costs from localStorage on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      costInputs.forEach(id => {
+        const savedValue = localStorage.getItem(id);
+        if (savedValue !== null) {
+          const input = document.getElementById(id);
+          if(input) input.value = savedValue;
+        }
+      });
+    });
+
+    // Save on input change with debouncing (to avoid too frequent writes)
+    let saveTimeout;
+    costInputs.forEach(id => {
+      const input = document.getElementById(id);
+      if(input) {
+        input.addEventListener('input', (e) => {
+          clearTimeout(saveTimeout);
+          saveTimeout = setTimeout(() => {
+            localStorage.setItem(id, e.target.value);
+          }, 500);
+        });
+      }
+    });
+  </script>
+</body>
+</html>

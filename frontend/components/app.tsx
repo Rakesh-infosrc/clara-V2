@@ -1,21 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Room, RoomEvent } from 'livekit-client';
 import { motion } from 'motion/react';
-import {
-  RoomAudioRenderer,
-  RoomContext,
-  StartAudio,
-} from '@livekit/components-react';
+import { RoomAudioRenderer, RoomContext, StartAudio } from '@livekit/components-react';
+import VideoCapture from '@/components/VideoCapture';
 import { toastAlert } from '@/components/alert-toast';
+import AnimatedBackground from '@/components/animated-background';
 import { SessionView } from '@/components/session-view';
 import { Toaster } from '@/components/ui/sonner';
 import { Welcome } from '@/components/welcome';
-import type { AppConfig } from '@/lib/types';
-import VideoCapture from "@/components/VideoCapture"
-import AnimatedBackground from '@/components/animated-background';
 import useChatAndTranscription from '@/hooks/useChatAndTranscription';
+import type { AppConfig } from '@/lib/types';
+import { BACKEND_BASE_URL } from '@/lib/utils';
 
 const MotionWelcome = motion.create(Welcome);
 const MotionSessionView = motion.create(SessionView);
@@ -30,7 +27,8 @@ function FaceCaptureDock() {
   const handleVerified = useCallback(
     (employeeName?: string, employeeId?: string, agentMessage?: string) => {
       const trimmedMessage = agentMessage?.trim();
-      const displayName = employeeName && employeeName.trim().length > 0 ? employeeName.trim() : 'there';
+      const displayName =
+        employeeName && employeeName.trim().length > 0 ? employeeName.trim() : 'there';
       const safeMessage =
         trimmedMessage && trimmedMessage.length > 0
           ? trimmedMessage
@@ -44,7 +42,7 @@ function FaceCaptureDock() {
   );
 
   return (
-    <div className="absolute bottom-4 right-4 bg-blue-950 shadow-lg rounded-lg mb-34">
+    <div className="absolute right-4 bottom-4 mb-34 rounded-lg bg-blue-950 shadow-lg">
       <VideoCapture onVerified={handleVerified} />
     </div>
   );
@@ -53,21 +51,52 @@ function FaceCaptureDock() {
 export function App({ appConfig }: AppProps) {
   const room = useMemo(() => new Room(), []);
   const [sessionStarted, setSessionStarted] = useState(false);
+  const roomNameRef = useRef<string | null>(null);
 
   // ✅ Fetch token + URL from FastAPI backend
-  const getConnectionDetails = async (identity: string) => {
-    const resp = await fetch(
-      `http://127.0.0.1:8000/get-token?identity=${identity}`
-    );
-    if (!resp.ok) {
-      throw new Error(`Failed to fetch token: ${resp.status}`);
-    }
-    const data = await resp.json();
-    return {
-      serverUrl: data.url,
-      participantToken: data.token,
-    };
-  };
+  const backendBase = BACKEND_BASE_URL;
+  const createRoomSession = useCallback(
+    async (identity: string) => {
+      const roomName = `Clara-room-${Date.now()}`;
+
+      const tokenResp = await fetch(
+        `${backendBase}/get-token?identity=${encodeURIComponent(identity)}&room=${encodeURIComponent(roomName)}`
+      );
+      console.log('createRoomSession/get-token', {
+        roomName,
+        identity,
+        status: tokenResp.status,
+      });
+      if (!tokenResp.ok) {
+        throw new Error(`Failed to fetch token: ${tokenResp.status}`);
+      }
+      const tokenData = await tokenResp.json();
+
+      const dispatchResp = await fetch(`${backendBase}/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          room: roomName,
+          agent_name: appConfig.agentName || 'clara-receptionist',
+        }),
+      });
+      console.log('createRoomSession/dispatch', {
+        roomName,
+        status: dispatchResp.status,
+      });
+
+      if (!dispatchResp.ok) {
+        throw new Error(`Failed to dispatch agent: ${dispatchResp.status}`);
+      }
+
+      return {
+        serverUrl: tokenData.url,
+        participantToken: tokenData.token,
+        roomName,
+      };
+    },
+    [appConfig.agentName, backendBase]
+  );
 
   useEffect(() => {
     const onDisconnected = () => {
@@ -105,8 +134,24 @@ export function App({ appConfig }: AppProps) {
           await new Promise((res) => setTimeout(res, 500));
         }
 
-        // 3️⃣ Fetch new token from backend
-        const connectionDetails = await getConnectionDetails(identity);
+        if (roomNameRef.current) {
+          const previousRoom = roomNameRef.current;
+          roomNameRef.current = null;
+          try {
+            await fetch(`${backendBase}/flow/end`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ room: previousRoom }),
+            });
+          } catch (cleanupErr) {
+            console.warn('Failed to clean up previous room', previousRoom, cleanupErr);
+          }
+        }
+
+        // 3️⃣ Fetch new token & dispatch agent for dedicated room
+        const connectionDetails = await createRoomSession(identity);
+        const activeRoom = connectionDetails.roomName;
+        roomNameRef.current = activeRoom;
 
         // 4️⃣ Connect to LiveKit
         await room.connect(connectionDetails.serverUrl, connectionDetails.participantToken);
@@ -117,11 +162,12 @@ export function App({ appConfig }: AppProps) {
         });
 
         if (!aborted) setSessionStarted(true);
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (aborted) return;
+        const err = error instanceof Error ? error : new Error('Unknown LiveKit connection error');
         toastAlert({
           title: 'Error connecting to LiveKit',
-          description: `${error.name}: ${error.message}`,
+          description: `${err.name}: ${err.message}`,
         });
       }
     };
@@ -132,9 +178,18 @@ export function App({ appConfig }: AppProps) {
 
     return () => {
       aborted = true;
-      room.disconnect().catch(() => { });
+      room.disconnect().catch(() => {});
+      const roomToClose = roomNameRef.current;
+      roomNameRef.current = null;
+      if (roomToClose) {
+        fetch(`${backendBase}/flow/end`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ room: roomToClose }),
+        }).catch(() => {});
+      }
     };
-  }, [sessionStarted, room, appConfig.isPreConnectBufferEnabled]);
+  }, [sessionStarted, room, appConfig.isPreConnectBufferEnabled, backendBase, createRoomSession]);
 
   const { startButtonText } = appConfig;
 
@@ -169,7 +224,7 @@ export function App({ appConfig }: AppProps) {
             animate={{ opacity: sessionStarted ? 1 : 0 }}
             transition={{
               duration: 0.5,
-              ease: "linear",
+              ease: 'linear',
               delay: sessionStarted ? 0.5 : 0,
             }}
           />
@@ -177,7 +232,6 @@ export function App({ appConfig }: AppProps) {
           {/* 👇 Face Recognition UI with automatic agent greeting */}
           {sessionStarted && <FaceCaptureDock />}
         </RoomContext.Provider>
-
 
         <Toaster />
       </div>
