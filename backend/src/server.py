@@ -9,24 +9,20 @@ import asyncio
 import contextlib
 import io
 from datetime import datetime
-from fastapi import FastAPI, Query, File, UploadFile, Request, HTTPException
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
+
 from dotenv import load_dotenv
+from fastapi import FastAPI, Query, File, UploadFile, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from livekit import api  # Correct LiveKit import
+from livekit.protocol.agent_dispatch import CreateAgentDispatchRequest
+from pydantic import BaseModel
+
+from flow_signal import get_signal as flow_get_signal
+from tools import run_face_verify
 
 # Suppress pkg_resources deprecation warning from face_recognition_models
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated", category=UserWarning)
-
-# Ensure src package imports work when running from project root
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent))
-
-from tools import run_face_verify
-from livekit import api  # Correct LiveKit import
-from fastapi.responses import JSONResponse
-from livekit.protocol.agent_dispatch import CreateAgentDispatchRequest
-from flow_signal import get_signal as flow_get_signal
 
 # Load environment variables from .env
 load_dotenv()
@@ -36,7 +32,7 @@ API_SECRET = os.getenv("LIVEKIT_API_SECRET", "secret")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
 
 ORIGINS = [
-    "http://localhost:3000",
+    "http://localhost:3003",
     "http://localhost:3003",
     "http://127.0.0.1:3000",
     "http://clara-frontend.s3-website-us-east-1.amazonaws.com/",
@@ -47,7 +43,17 @@ ORIGINS = [
 
 app = FastAPI()
 
-
+@app.get("/generation")
+async def create_token(room: str, identity: str):
+    try:
+        # Mint a LiveKit access token for the frontend to join a room
+        at = api.AccessToken()
+        grants = api.VideoGrants(room_join=True, room=room, can_publish=True, can_subscribe=True)
+        token = at.with_grants(grants).with_identity(identity).to_jwt()
+        return {"token": token, "url": LIVEKIT_URL}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"Failed to create token: {str(e)}"})
+    
 @app.get("/health", include_in_schema=False)
 async def health_check():
     """ALB health check endpoint."""
@@ -159,7 +165,6 @@ async def run_face_encoding_endpoint():
 async def trigger_employee_mode():
     """Test endpoint to manually trigger employee classification and face capture"""
     from flow_manager import VirtualReceptionistFlow
-    from flow_signal import post_signal
     
     # Create flow manager instance
     flow_manager = VirtualReceptionistFlow()
@@ -384,7 +389,6 @@ async def employee_verify_endpoint(request: EmployeeVerificationRequest):
     """Manual employee verification with OTP"""
     try:
         from tools.employee_verification import get_employee_details
-        from livekit.agents import RunContext
         
         # Create a mock context for the tool
         context = None  # The tool doesn't actually use the context parameter
@@ -433,15 +437,35 @@ async def notify_agent_verification(request: dict):
     """Notify the agent that a user has been verified via face recognition"""
     try:
         from agent_state import set_user_verified
+        from flow_manager import flow_manager, FlowState, UserType
         
         name = request.get('name')
         user_id = request.get('user_id')
         
         if name:
             set_user_verified(name, user_id)
+            # Ensure a flow session reflects verification immediately
+            try:
+                session = flow_manager.get_current_session()
+                if not session:
+                    flow_manager.create_session()
+                    session = flow_manager.get_current_session()
+                if session:
+                    session.is_verified = True
+                    session.user_type = UserType.EMPLOYEE
+                    session.current_state = FlowState.EMPLOYEE_VERIFIED
+                    session.user_data.update({
+                        "employee_name": name,
+                        "employee_id": user_id,
+                        "verification_method": "external_notification"
+                    })
+                    flow_manager.save_sessions()
+            except Exception as _e:
+                print(f"Warning: could not sync flow session on notify_agent_verification: {_e}")
+
             return {
                 "success": True,
-                "message": f"Agent notified of verification for {name}"
+                "message": f"Agent and flow session updated for {name}"
             }
         else:
             return {
@@ -569,21 +593,24 @@ async def manual_verification_flow(request: dict):
         msg = await get_employee_details(None, name, employee_id, otp)
         success = ("✅" in msg) and ("OTP verified" in msg or "Welcome" in msg)
         if success:
-            # Mark verified and move to credential check (offer face registration)
+            # Mark verified and complete flow without face registration prompt
             if session:
                 session.user_data["verification_method"] = "manual_with_otp"
                 session.is_verified = True
-                session.current_state = FlowState.CREDENTIAL_CHECK
+                session.current_state = FlowState.EMPLOYEE_VERIFIED
                 flow_manager.save_sessions()
             try:
                 set_user_verified(name, employee_id)
             except Exception as _e:
                 print(f"Warning: could not sync agent state after OTP verify: {_e}")
 
+            lang = get_preferred_language()
+            completion_message = get_message("manual_credentials_verified", lang, name=name)
+
             return {
                 "success": True,
-                "message": f"Credentials verified! Welcome {name}. Would you like to register your face for faster access next time? (Yes/No)",
-                "next_state": FlowState.CREDENTIAL_CHECK.value,
+                "message": completion_message,
+                "next_state": FlowState.EMPLOYEE_VERIFIED.value,
                 "flow_status": flow_manager.get_flow_status()
             }
         else:
@@ -629,7 +656,6 @@ async def register_employee_face_endpoint(image: UploadFile = File(...), employe
     """
     try:
         from tools.face_registration import register_employee_face as register_face_tool
-        from livekit.agents import RunContext
         from flow_manager import flow_manager
         
         # Fallback to current session's employee id

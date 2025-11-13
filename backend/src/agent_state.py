@@ -1,6 +1,5 @@
 import time
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -186,7 +185,9 @@ def _infer_language_from_input(user_input: str) -> str:
     return get_preferred_language()
 
 def _detect_language_switch_request(text: str) -> str | None:
-    lowered = text.lower()
+    lowered = text.lower().strip()
+
+    # 1) Explicit phrases
     patterns = {
         "ta": ["talk in tamil", "speak tamil", "tamil la", "tamil lo"],
         "te": ["talk in telugu", "speak telugu", "telugu lo", "telugu please"],
@@ -197,11 +198,32 @@ def _detect_language_switch_request(text: str) -> str | None:
         for phrase in triggers:
             if phrase in lowered:
                 return lang_code
-    stripped = text.strip()
-    if len(stripped) >= 4 and (" " in stripped or "-" in stripped):
-        detected = resolve_language_code(stripped.lower())
-        if detected != DEFAULT_LANGUAGE:
-            return detected
+
+    # 2) One-word language names (Latin script)
+    single_word = {
+        "english": "en",
+        "tamil": "ta",
+        "telugu": "te",
+        "hindi": "hi",
+    }
+    if lowered in single_word:
+        return single_word[lowered]
+
+    # 3) Native-script names
+    native_names = {
+        "தமிழ்": "ta",
+        "తెలుగు": "te",
+        "हिंदी": "hi",
+        "हिन्दी": "hi",
+    }
+    if text.strip() in native_names:
+        return native_names[text.strip()]
+
+    # 4) Direct mapping via resolver for any clean label
+    detected = resolve_language_code(lowered)
+    if detected in SUPPORTED_LANGUAGES:
+        return detected
+
     return None
 
 
@@ -226,10 +248,8 @@ def process_input(user_input: str) -> tuple[bool, str]:
         update_activity()
         return True, get_message("language_support_affirm", lang)
 
-    detected_lang = _infer_language_from_input(user_input)
-    if detected_lang != get_preferred_language():
-        set_preferred_language(detected_lang)
-
+    # Do NOT auto-switch languages heuristically.
+    # Keep current preference (defaults to English) until the user explicitly switches.
     lang = get_preferred_language()
     normalized_input = normalize_transcript(user_input.strip(), lang)
     wake_phrases = get_wake_phrases(lang)

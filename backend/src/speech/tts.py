@@ -73,7 +73,6 @@ class CoquiTTS:
             emotion=self.config.emotion if hasattr(self, "config") else None,
         )
         # coqui returns numpy array float32 in range [-1, 1]; convert to PCM16 bytes
-        import numpy as np  # type: ignore
 
         audio = (wav * 32767).astype("int16")
         return audio.tobytes()

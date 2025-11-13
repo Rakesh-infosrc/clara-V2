@@ -16,7 +16,7 @@ export type ConnectionDetails = {
   participantToken: string;
 };
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
     if (LIVEKIT_URL === undefined) {
       throw new Error('LIVEKIT_URL is not defined');
@@ -28,6 +28,8 @@ export async function POST() {
       throw new Error('LIVEKIT_API_SECRET is not defined');
     }
 
+    // Parse agent configuration from request body
+    await req.json();
     // Generate participant token with FIXED room name for agent matching
     const participantName = 'user';
     const participantIdentity = `voice_assistant_user_${Math.floor(Math.random() * 10_000)}`;
@@ -47,7 +49,6 @@ export async function POST() {
     };
     const headers = new Headers({
       'Cache-Control': 'no-store',
-      'Access-Control-Allow-Origin': '*',
     });
     return NextResponse.json(data, { headers });
   } catch (error) {

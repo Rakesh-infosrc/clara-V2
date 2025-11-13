@@ -1,6 +1,5 @@
 from typing import Optional
 
-import os
 import smtplib
 from email.message import EmailMessage
 from smtplib import SMTPAuthenticationError, SMTPException

@@ -166,8 +166,6 @@ def _manager_visit_message(emp_id: Optional[str], emp_name: str, default_message
         return default_message
 
     office = record.get("office") or record.get("Office") or "our office"
-    manager_name = record.get("manager_name") or record.get("ManagerName")
-
     parts = [
         "✅ OTP verified.",
         f"Welcome {emp_name}!",

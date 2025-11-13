@@ -3,6 +3,7 @@ import pickle
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import time
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 import face_recognition
@@ -37,9 +38,54 @@ def _list_employee_images(client, bucket: str, prefix: str | None) -> list[str]:
 
 
 def _load_image_from_s3(client, bucket: str, key: str):
-    response = client.get_object(Bucket=bucket, Key=key)
-    body = response["Body"].read()
-    return face_recognition.load_image_file(io.BytesIO(body))
+    """Download an image from S3 with simple retries and return as numpy array."""
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = client.get_object(Bucket=bucket, Key=key)
+            body = response["Body"].read()
+            return face_recognition.load_image_file(io.BytesIO(body))
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                # Backoff before retrying transient errors
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            raise
+
+
+def _encode_image_robust(image):
+    """Try multiple strategies to obtain a single face encoding from an image."""
+    # 1) Default quick path
+    encodings = face_recognition.face_encodings(image)
+    if encodings:
+        return encodings[0], None
+
+    # 2) Fallbacks: increase upsample and use HOG model explicitly
+    for upsample in (1, 2):
+        locations = face_recognition.face_locations(
+            image, number_of_times_to_upsample=upsample, model="hog"
+        )
+        if locations:
+            encodings = face_recognition.face_encodings(
+                image, known_face_locations=locations, num_jitters=2
+            )
+            if encodings:
+                return encodings[0], None
+
+    # 3) Optional CNN detector (if available), best-effort
+    try:
+        locations = face_recognition.face_locations(image, model="cnn")
+        if locations:
+            encodings = face_recognition.face_encodings(
+                image, known_face_locations=locations, num_jitters=1
+            )
+            if encodings:
+                return encodings[0], None
+    except Exception:
+        pass
+
+    return None, "no_face"
 
 
 def _encode_single_key(client, bucket: str, key: str) -> tuple[str | None, bytes | None, str]:
@@ -48,12 +94,12 @@ def _encode_single_key(client, bucket: str, key: str) -> tuple[str | None, bytes
     except Exception as exc:  # pragma: no cover - defensive logging
         return None, None, f"  ⚠ Failed to load {key}: {exc}"
 
-    encodings = face_recognition.face_encodings(image)
-    if not encodings:
+    encoding, _warn = _encode_image_robust(image)
+    if encoding is None:
         return None, None, f"  ⚠ No face found in {key}"
 
     employee_id = Path(key).stem
-    return employee_id, encodings[0], f"  ✔ Encoded Employee ID: {employee_id}"
+    return employee_id, encoding, f"  ✔ Encoded Employee ID: {employee_id}"
 
 
 def main():
@@ -100,6 +146,7 @@ def main():
 
     max_workers = min(8, len(filtered_keys)) or 1
     known_results: list[tuple[str, bytes]] = []
+    failed_keys: list[str] = []
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {
@@ -120,6 +167,15 @@ def main():
 
             if employee_id and encoding is not None:
                 known_results.append((employee_id, encoding))
+            else:
+                failed_keys.append(key)
+
+    total = len(filtered_keys)
+    print(f"[INFO] Encoded {len(known_results)}/{total} employees in this run")
+    if failed_keys:
+        print(f"[INFO] {len(failed_keys)} images had no detectable face or failed to load")
+        for k in failed_keys[:10]:
+            print(f"  ⚠ Skipped: {k}")
 
     if not known_results:
         print("⚠️ No face encodings were generated. Nothing to upload.")

@@ -103,7 +103,7 @@ class VirtualReceptionistFlow:
     def process_wake_word_detected(self) -> Tuple[bool, str]:
         """Process wake word detection - start of flow"""
         # Create new session or reset existing one
-        session_id = self.create_session()
+        self.create_session()
         session = self.get_current_session()
 
         if session:
@@ -125,7 +125,7 @@ class VirtualReceptionistFlow:
         if not session:
             # Create a new session if none exists
             print("[Flow] No session found, creating new session for classification")
-            session_id = self.create_session()
+            self.create_session()
             session = self.get_current_session()
             if not session:
                 lang = get_preferred_language()
@@ -317,51 +317,26 @@ class VirtualReceptionistFlow:
             self.save_sessions()
             lang = get_preferred_language()
             
-            # Check for manager visit and provide personalized greeting
-            from tools.manager_visit_repository import get_manager_visit
+            greeting_parts = [get_message("face_recognition_success", lang, name=emp_name)]
+            
+            # Check if there's an actual manager visit scheduled for today
             from datetime import datetime
-            # Use zero-padded date format to match DynamoDB partition keys (e.g., "2025-11-03")
-            today = datetime.now().strftime("%Y-%m-%d")
+            from tools.manager_visit_repository import get_manager_visit
+            
+            now = datetime.now()
+            today = f"{now.year}-{now.month}-{now.day}"
             visit_record = get_manager_visit(emp_id, today)
             
-            visit_context_line = None
-            office = "our"
-
             if visit_record:
-                office = visit_record.get("office") or visit_record.get("Office") or "our"
-                manager_name = visit_record.get("manager_name") or visit_record.get("ManagerName")
-                notes = visit_record.get("notes") or visit_record.get("Notes")
-                visit_date_str = str(visit_record.get("visit_date") or today)
-
-                try:
-                    parsed_visit_date = datetime.strptime(visit_date_str, "%Y-%m-%d")
-                    visit_date_human = parsed_visit_date.strftime("%B %d").lower()
-                except ValueError:
-                    visit_date_human = "today"
-
-                if manager_name and notes:
-                    visit_context_line = (
-                        f"You have {notes.lower()} with {manager_name} at our {office} office {visit_date_human}."
-                    )
-                elif manager_name:
-                    visit_context_line = f"You're scheduled to meet {manager_name} at our {office} office {visit_date_human}."
-                elif notes:
-                    visit_context_line = f"Your agenda for {visit_date_human} at our {office} office is {notes.lower()}."
-                else:
-                    visit_context_line = f"Welcome back to our {office} office {visit_date_human}."
-
-            greeting_parts = [get_message("face_recognition_success", lang, name=emp_name)]
-            if visit_context_line:
-                greeting_parts.append(visit_context_line)
-
-            office_segment = "our" if office == "our" else f"our {office}"
-            greeting_parts.extend(
-                [
-                    f"Hope you had a smooth and comfortable journey. It was wonderful having you at {office_segment} office.",
-                    "We truly hope your visit was both memorable and meaningful.",
-                    "Thanks so much for taking the time to be with us."
-                ]
-            )
+                # Manager visit exists for today - show farewell message
+                office = visit_record.get("office") or visit_record.get("Office") or "our office"
+                greeting_parts.extend(
+                    [
+                        f"Hope you had a smooth and comfortable journey. It was wonderful having you at our {office} office.",
+                        "We truly hope your visit was both memorable and meaningful.",
+                        "Thanks so much for taking the time to be with us."
+                    ]
+                )
 
             return True, "\n".join(greeting_parts), FlowState.EMPLOYEE_VERIFIED
         else:
@@ -401,8 +376,15 @@ class VirtualReceptionistFlow:
                     if resolved_email:
                         session.user_data.setdefault("manual_employee_id", record_by_id.get("employee_id"))
                         session.user_data.setdefault("manual_name", record_by_id.get("name"))
+                else:
+                    lang = get_preferred_language()
+                    warning = get_message("manual_employee_not_found", lang)
+                    print(f"[Flow] Employee lookup by ID returned no record: {employee_id}")
+                    return False, warning, FlowState.MANUAL_VERIFICATION
             except Exception as lookup_error:
                 print(f"[Flow] Employee lookup by ID failed: {lookup_error}")
+                lang = get_preferred_language()
+                return False, get_message("manual_employee_lookup_failed", lang, error=lookup_error), FlowState.MANUAL_VERIFICATION
 
         if resolved_email:
             session.user_data["manual_email"] = resolved_email
@@ -439,7 +421,7 @@ class VirtualReceptionistFlow:
             if success:
                 session.user_data["verification_method"] = "manual_with_otp"
                 session.is_verified = True
-                session.current_state = FlowState.CREDENTIAL_CHECK
+                session.current_state = FlowState.EMPLOYEE_VERIFIED
                 from agent_state import set_user_verified
                 verified_name = session.user_data.get("manual_name") or name
                 verified_id = session.user_data.get("manual_employee_id") or employee_id
@@ -452,7 +434,7 @@ class VirtualReceptionistFlow:
                     combined_message = f"{combined_message}\n\n{credentials_prompt}"
                 else:
                     combined_message = credentials_prompt
-                return True, combined_message, FlowState.CREDENTIAL_CHECK
+                return True, combined_message, FlowState.EMPLOYEE_VERIFIED
             else:
                 lang = get_preferred_language()
                 return False, (msg or get_message("manual_otp_failed", lang)), FlowState.MANUAL_VERIFICATION
@@ -626,24 +608,8 @@ class VirtualReceptionistFlow:
             self.save_sessions()
             print(f"[Flow] Visitor info received: name='{trimmed_name}', phone='{trimmed_phone}', purpose='{trimmed_purpose}', host='{trimmed_host}'")
 
-            # Signal frontend to capture photo instead of creating placeholder
-            try:
-                from flow_signal import post_signal
-                print("[Flow] Emitting signal: start_visitor_photo -> /flow/visitor_photo")
-                post_signal("start_visitor_photo", {
-                    "message": get_message("flow_visitor_face_capture_prompt", lang),
-                    "next_endpoint": "/flow/visitor_photo",
-                    "visitor_name": trimmed_name
-                })
-                self.save_sessions()
-                print(f"[Flow] Photo capture signal sent for visitor: {trimmed_name}")
-                prompt = get_message("visitor_photo_prompt", lang, host=trimmed_host)
-                return True, prompt, FlowState.HOST_NOTIFICATION
-            except Exception as e:
-                print(f"[Flow] ERROR in photo signal: {e}")
-                import traceback
-                traceback.print_exc()
-                return True, get_message("flow_host_notification_prompt", lang), FlowState.FLOW_END
+            wait_message = get_message("flow_host_notification_prompt", lang)
+            return True, wait_message, FlowState.HOST_NOTIFICATION
 
         except Exception as e:
             print(f"[Flow] CRITICAL ERROR in process_visitor_info: {e}")
@@ -652,26 +618,15 @@ class VirtualReceptionistFlow:
             return False, f"Error processing visitor information: {str(e)}", FlowState.IDLE
     
     def process_visitor_face_capture(self, captured: bool = True) -> Tuple[bool, str, FlowState]:
-        """Process visitor face capture"""
+        """Deprecated: Visitor photo capture no longer required. Provide wait message."""
         session = self.get_current_session()
-        if not session or session.user_type != UserType.VISITOR:
-            # Try to recover the most recent visitor session (e.g. if current_session_id shifted)
-            visitor_sessions = [s for s in self.sessions.values() if s.user_type == UserType.VISITOR]
-            if visitor_sessions:
-                session = max(visitor_sessions, key=lambda s: s.last_activity)
-                self.current_session_id = session.session_id
-            else:
-                return False, "Invalid session or user type", FlowState.IDLE
-
-        if captured:
-            session.user_data["face_captured"] = True
-            session.user_data["face_capture_time"] = datetime.now().isoformat()
-            session.current_state = FlowState.FLOW_END
+        lang = get_preferred_language()
+        if session and session.user_type == UserType.VISITOR:
+            session.current_state = FlowState.HOST_NOTIFICATION
+            session.last_activity = time.time()
             self.save_sessions()
-
-            return True, "Visitor Photo captured!", FlowState.FLOW_END
-        else:
-            return False, "Photo capture failed. Please try again.", FlowState.HOST_NOTIFICATION
+        wait_message = get_message("flow_host_notification_prompt", lang)
+        return True, wait_message, FlowState.HOST_NOTIFICATION
 
     def check_tool_access(self, tool_name: str) -> Tuple[bool, str]:
         session = self.get_current_session()

@@ -59,7 +59,7 @@ MESSAGES = {
         "hi": "बहुत बढ़िया! मैं हिंदी में बात करूँगी। क्या आप कर्मचारी हैं या आगंतुक?\n(English) I'll speak Hindi. Are you an Employee or a Visitor?",
     },
     "classification_employee": {
-        "en": "Great! Please tap the Employee Mode button, then look at the camera for verification.",
+        "en": "Employee mode is ready. Tap the button and look at the camera so I can verify you now.",
         "ta": "சிறப்பாக இருக்கிறது! Employee Mode பொத்தானை தட்டி, பின்னர் சரிபார்ப்புக்காக கேமராவை நோக்கிப் பாருங்கள்.",
         "te": "గ్రేట్! దయచేసి Employee Mode బటన్‌ను ట్యాప్ చేసి, నిర్ధారణ కోసం కెమెరా వైపు చూడండి.",
         "hi": "बहुत बढ़िया! कृपया Employee Mode बटन टैप करें और फिर सत्यापन के लिए कैमरे की ओर देखें।",
@@ -83,10 +83,10 @@ MESSAGES = {
         "hi": "कृपया अपना नाम और कर्मचारी आईडी बताइए। यदि आपको ओटीपी मिला है तो अभी बताइए।",
     },
     "flow_credential_check_prompt": {
-        "en": "Would you like me to register your face for faster access next time?",
-        "ta": "அடுத்த முறை வேகமான அணுகலுக்காக உங்கள் முகத்தை பதிவு செய்ய விரும்புகிறீர்களா?",
-        "te": "మతరువాత వేగంగా ప్రవేశించడానికి మీ ముఖాన్ని రిజిస్టర్ చేయాలని మీరు కోరుకుంటున్నారా?",
-        "hi": "क्या आप अगली बार तेज़ प्रवेश के लिए अपना चेहरा पंजीकृत कराना चाहेंगे?",
+        "en": "Credentials verified! You're all set to continue.",
+        "ta": "சரிபார்ப்பு வெற்றிகரமாக முடிந்தது! நீங்கள் தொடரலாம்.",
+        "te": "క్రెడెన్షియల్స్ వెరిఫై అయ్యాయి! మీరు ముందుకు సాగవచ్చు.",
+        "hi": "सत्यापन सफल हुआ! अब आप आगे बढ़ सकते हैं।",
     },
     "flow_face_registration_prompt": {
         "en": "Hold still and look at the camera — capturing your face now.",
@@ -95,10 +95,10 @@ MESSAGES = {
         "hi": "स्थिर रहें और कैमरे की ओर देखें — मैं अभी आपका चेहरा कैप्चर कर रही हूँ।",
     },
     "flow_employee_verified_prompt": {
-        "en": "You are all set. How may I assist you today?",
-        "ta": "நீங்கள் தயார். இன்று எப்படி உதவலாம்?",
-        "te": "మీ అన్ని ఏర్పాట్లు పూర్తయ్యాయి. నేను ఈ రోజు ఎలా సహాయం చేయగలను?",
-        "hi": "सब तैयार है। आज मैं आपकी कैसे मदद कर सकती हूँ?",
+        "en": "How may I assist you?",
+        "ta": "எப்படி உதவலாம்?",
+        "te": "నేను ఎలా సహాయం చేయగలను?",
+        "hi": "मैं आपकी कैसे मदद कर सकती हूँ?",
     },
     "flow_visitor_info_prompt": {
         "en": "Please tell me your name, phone number, purpose of visit, and whom you are meeting.",
@@ -197,10 +197,10 @@ MESSAGES = {
         "hi": "सत्यापन के दौरान आंतरिक त्रुटि हुई। कृपया ओटीपी फिर से बताएँ।",
     },
     "manual_credentials_verified": {
-        "en": "Credentials verified! Would you like to register your face for faster access next time? (Yes or No)",
-        "ta": "சரிபார்ப்பு வெற்றிகரமாக முடிந்தது! அடுத்த முறை விரைவாக அணுக முகம் பதிவு செய்ய விரும்புகிறீர்களா? (ஆம்/இல்லை)",
-        "te": "క్రెడెన్షియల్స్ వెరిఫై అయ్యిది! తదుపరి సులభమైన ప్రవేశం కోసం మీ ముఖాన్ని రిజిస్టర్ చేయాలా? (అవును లేదా కాదు)",
-        "hi": "सत्यापन सफल हो गया! अगली बार तेज़ प्रवेश के लिए क्या आप अपना चेहरा पंजीकृत कराना चाहेंगे? (हाँ/नहीं)",
+        "en": "Credentials verified! You're all set to continue.",
+        "ta": "சரிபார்ப்பு வெற்றிகரமாக முடிந்தது! நீங்கள் தொடரலாம்.",
+        "te": "క్రెడెన్షియల్స్ వెరిఫై అయ్యాయి! మీరు ముందుకు సాగవచ్చు.",
+        "hi": "सत्यापन सफल हुआ! अब आप आगे बढ़ सकते हैं।",
     },
     "manual_otp_failed": {
         "en": "OTP verification failed. Please request a new OTP or try again.",
@@ -214,11 +214,23 @@ MESSAGES = {
         "te": "మీ నమోదిత ఫోన్ నంబర్‌కు SMS ద్వారా OTP పంపాను. వెరిఫికేషన్ పూర్తి చేయడానికి దయచేసి దాన్ని చెప్పండి.",
         "hi": "मैंने आपके पंजीकृत फोन नंबर पर SMS के माध्यम से ओटीपी भेजा है। सत्यापन पूरा करने के लिए कृपया उसे बताएं।",
     },
+    "manual_employee_not_found": {
+        "en": "I couldn't find that employee ID. Please double-check it or share your registered email.",
+        "ta": "அந்த ஊழியர் அடையாள எண் கிடைக்கவில்லை. தயவுசெய்து மீண்டும் சரிபார்க்கவும் அல்லது உங்கள் பதிவு செய்யப்பட்ட மின்னஞ்சலைச் சொல்லவும்.",
+        "te": "ఆ ఉద్యోగి ఐడీ కనబడలేదు. దయచేసి మరోసారి తనిఖీ చేయండి లేదా మీ రిజిస్టర్ చేసిన ఈమెయిల్‌ను చెప్పండి.",
+        "hi": "मुझे वह कर्मचारी आईडी नहीं मिली। कृपया दोबारा जाँचें या अपना पंजीकृत ईमेल बताएं।",
+    },
+    "manual_employee_lookup_failed": {
+        "en": "I had trouble checking that employee record ({error}). Could you try again shortly or contact reception?",
+        "ta": "அந்த ஊழியர் பதிவைச் சரிபார்க்கும்போது சிக்கல் ஏற்பட்டது ({error}). தயவுசெய்து சிறிது நேரத்தில் மீண்டும் முயற்சிக்கவும் அல்லது வரவேற்பை தொடர்புகொள்ளவும்.",
+        "te": "ఆ ఉద్యోగి రికార్డ్ చూడడంలో సమస్య వచ్చింది ({error}). కొద్దిసేపటికి మళ్లీ ప్రయత్నించండి లేదా రిసెప్షన్‌ను సంప్రదించండి.",
+        "hi": "उस कर्मचारी रिकॉर्ड की जाँच में समस्या हुई ({error})। कृपया थोड़ी देर में फिर प्रयास करें या रिसेप्शन से संपर्क करें।",
+    },
     "manual_otp_send_failed": {
         "en": "I couldn't send the OTP right now ({error}). Please try again shortly.",
         "ta": "இப்போது OTP அனுப்ப முடியவில்லை ({error}). சிறிது நேரத்தில் மீண்டும் முயற்சிக்கவும்.",
         "te": "ప్రస్తుతం OTP పంపలేకపోయాను ({error}). కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
-        "hi": "मैं फिलहाल ओटीपी भेज नहीं पाई ({error})। कृपया थोड़ी देर में फिर कोशिश करें।",
+        "hi": "मैं फिलहाल ओटीपी भेज नहीं पाई ({error})। कृपया थोड़ी देर में फिर कोशिश करें.",
     },
     "manual_invalid_session": {
         "en": "Invalid session or user type.",
@@ -379,7 +391,7 @@ WAKE_PHRASES = {
 
 
 SLEEP_PHRASES = {
-    "en": ["go idle", "sleep now", "take a break"],
+    "en": ["go idle", "sleep now"],
     "ta": ["ஓய்வு எடு", "தூங்கிக்கொள்", "ஓய்வெணு", "go idle"],
     "te": ["విశ్రాంతి తీసుకో", "నిద్రపో", "అలసిపోయి విశ్రాంతి తీసుకో", "go idle"],
     "hi": ["सो जाओ", "आराम करो", "विराम लो", "go idle"],

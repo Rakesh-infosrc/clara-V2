@@ -1,5 +1,5 @@
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, BotoCoreError
 from boto3.dynamodb.conditions import Key
 
 from .config import (
@@ -8,6 +8,7 @@ from .config import (
     EMPLOYEE_EMAIL_INDEX,
     EMPLOYEE_ID_INDEX,
     EMPLOYEE_PRIMARY_KEY,
+    ID_INDEX_NAME,
 )
 
 
@@ -95,7 +96,7 @@ def get_employee_by_email(email: str) -> dict | None:
                 KeyConditionExpression=Key("email").eq(candidate),
                 Limit=1,
             )
-        except ClientError as exc:
+        except (ClientError, BotoCoreError, Exception) as exc:
             print(f"[employee_repository] DynamoDB query failed: {exc}")
             return None
 
@@ -119,7 +120,7 @@ def get_employee_by_email(email: str) -> dict | None:
             while True:
                 try:
                     response = table.scan(**scan_kwargs)
-                except ClientError as exc:
+                except (ClientError, BotoCoreError, Exception) as exc:
                     print(f"[employee_repository] DynamoDB scan failed: {exc}")
                     break
 
@@ -171,7 +172,7 @@ def get_employee_by_id(employee_id: str) -> dict | None:
 
     try:
         response = table.get_item(Key={EMPLOYEE_PRIMARY_KEY: key})
-    except ClientError as exc:
+    except (ClientError, BotoCoreError, Exception) as exc:
         print(f"[employee_repository] DynamoDB get_item failed: {exc}")
 
     item = response.get("Item") if response else None
@@ -186,9 +187,24 @@ def get_employee_by_id(employee_id: str) -> dict | None:
             items = response.get("Items", [])
             if items:
                 item = items[0]
-        except ClientError as exc:
+        except (ClientError, BotoCoreError, Exception) as exc:
             print(f"[employee_repository] DynamoDB id index query failed: {exc}")
             return None
+
+    # Fallback: if still not found and an id-index is configured, try querying it by 'id'
+    if not item and ID_INDEX_NAME:
+        try:
+            response = table.query(
+                IndexName=ID_INDEX_NAME,
+                KeyConditionExpression=Key("id").eq(key),
+                Limit=1,
+            )
+            items = response.get("Items", [])
+            if items:
+                item = items[0]
+        except (ClientError, BotoCoreError, Exception) as exc:
+            print(f"[employee_repository] DynamoDB ID_INDEX_NAME query failed: {exc}")
+            # continue to final not-found handling
 
     if not item:
         print(
@@ -224,7 +240,7 @@ def get_employee_by_name(name: str) -> dict | None:
     while True:
         try:
             response = table.scan(**scan_kwargs)
-        except ClientError as exc:
+        except (ClientError, BotoCoreError, Exception) as exc:
             print(f"[employee_repository] DynamoDB scan for name failed: {exc}")
             return None
 

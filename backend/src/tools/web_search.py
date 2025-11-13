@@ -2,12 +2,64 @@ import asyncio
 import html
 import logging
 import re
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict
 
 import requests
 from livekit.agents import RunContext, function_tool
+from mem0_client import add_employee_memory
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_mem_identity() -> tuple[Optional[str], Optional[str], Optional[Dict[str, str]]]:
+    """Resolve current verified employee identity for private Mem0 storage."""
+    try:
+        from flow_manager import flow_manager
+        session = flow_manager.get_current_session()
+    except Exception:
+        session = None
+
+    employee_id: Optional[str] = None
+    employee_name: Optional[str] = None
+    if session and session.is_verified:
+        employee_id = (
+            session.user_data.get("employee_id")
+            or session.user_data.get("manual_employee_id")
+        )
+        employee_name = (
+            session.user_data.get("employee_name")
+            or session.user_data.get("manual_name")
+        )
+
+    if not (employee_id or employee_name):
+        try:
+            from agent_state import (
+                load_state_from_file as _load_state,
+                is_verified as _is_verified,
+                verified_user_name as _v_name,
+                verified_user_id as _v_id,
+            )
+            _load_state()
+            if _is_verified:
+                employee_id = employee_id or _v_id
+                employee_name = employee_name or _v_name
+        except Exception:
+            pass
+
+    if not (employee_id or employee_name):
+        return None, None, None
+
+    if employee_id and employee_name:
+        mem_user_id = f"{employee_id}:{employee_name}"
+    else:
+        mem_user_id = employee_id or employee_name
+
+    metadata = {
+        "employee_id": employee_id or "",
+        "employee_name": employee_name or "",
+        "type": "web_search",
+    }
+    return mem_user_id, employee_name, metadata
 
 
 @function_tool()
@@ -22,6 +74,52 @@ async def search_web(context: RunContext, query: str) -> str:
     try:
         results = await asyncio.wait_for(_duckduckgo_text_search(normalized_query), timeout=10)
         if results:
+            # Auto-store for verified employees with topic-focused summary and categories
+            try:
+                mem_user_id, employee_name, metadata = _resolve_mem_identity()
+                if mem_user_id:
+                    preview = _format_text_results(results)[:500]
+                    # Build a concise topic summary from top results
+                    try:
+                        titles = [t for (t, _b, _u) in results[:3]]
+                        links = [u for (_t, _b, u) in results if u][:3]
+                        title_join = "; ".join(titles)
+                        link_join = ", ".join(links)
+                        summary = f"Summary: {normalized_query} — Top results: {title_join}. Sources: {link_join}"
+                    except Exception:
+                        summary = f"Summary: {normalized_query} — Top results available."
+
+                    # Topic slug for custom categories
+                    try:
+                        topic_slug = re.sub(r"[^a-z0-9]+", "_", normalized_query.lower()).strip("_") or "topic"
+                    except Exception:
+                        topic_slug = "topic"
+
+                    payload = [
+                        {"role": "user", "content": f"Search for: {normalized_query}"},
+                        {"role": "assistant", "content": f"{summary}\n\n{preview}"},
+                    ]
+
+                    custom_categories = [
+                        {"web_search": "Auto-stored web search results"},
+                        {"technology": "Technology-related search and research"},
+                        {topic_slug: f"Topic: {normalized_query}"},
+                    ]
+
+                    meta = dict(metadata or {})
+                    meta["detail"] = summary
+                    meta["categories"] = ",".join({"web_search", "technology", topic_slug})
+
+                    add_employee_memory(
+                        payload,
+                        user_id=mem_user_id,
+                        metadata=meta,
+                        entities=[employee_name] if employee_name else None,
+                        custom_categories=custom_categories,
+                        output_format="v1.1",
+                    )
+            except Exception:
+                logger.debug("Skipping Mem0 auto-store for web search", exc_info=True)
             return _format_text_results(results)
         errors.append("No results returned from text endpoint.")
     except Exception as err:
@@ -32,6 +130,37 @@ async def search_web(context: RunContext, query: str) -> str:
     try:
         instant_answer = await asyncio.wait_for(_duckduckgo_instant_answer(normalized_query), timeout=6)
         if instant_answer:
+            # Auto-store instant answers with categories
+            try:
+                mem_user_id, employee_name, metadata = _resolve_mem_identity()
+                if mem_user_id:
+                    preview = instant_answer[:500]
+                    try:
+                        topic_slug = re.sub(r"[^a-z0-9]+", "_", normalized_query.lower()).strip("_") or "topic"
+                    except Exception:
+                        topic_slug = "topic"
+                    payload = [
+                        {"role": "user", "content": f"Search for: {normalized_query}"},
+                        {"role": "assistant", "content": f"Summary: {normalized_query} — Instant answer.\n\n{preview}"},
+                    ]
+                    custom_categories = [
+                        {"web_search": "Auto-stored web search results"},
+                        {"technology": "Technology-related search and research"},
+                        {topic_slug: f"Topic: {normalized_query}"},
+                    ]
+                    meta = dict(metadata or {})
+                    meta["detail"] = f"Summary: {normalized_query} — Instant answer."
+                    meta["categories"] = ",".join({"web_search", "technology", topic_slug})
+                    add_employee_memory(
+                        payload,
+                        user_id=mem_user_id,
+                        metadata=meta,
+                        entities=[employee_name] if employee_name else None,
+                        custom_categories=custom_categories,
+                        output_format="v1.1",
+                    )
+            except Exception:
+                logger.debug("Skipping Mem0 auto-store for instant answer", exc_info=True)
             return instant_answer
         errors.append("Instant answer API returned empty response.")
     except Exception as err:
@@ -42,6 +171,37 @@ async def search_web(context: RunContext, query: str) -> str:
     try:
         html_results = await asyncio.wait_for(_duckduckgo_html_fallback(normalized_query), timeout=8)
         if html_results:
+            # Auto-store HTML fallback results with categories
+            try:
+                mem_user_id, employee_name, metadata = _resolve_mem_identity()
+                if mem_user_id:
+                    preview = _format_text_results(html_results)[:500]
+                    try:
+                        topic_slug = re.sub(r"[^a-z0-9]+", "_", normalized_query.lower()).strip("_") or "topic"
+                    except Exception:
+                        topic_slug = "topic"
+                    payload = [
+                        {"role": "user", "content": f"Search for: {normalized_query}"},
+                        {"role": "assistant", "content": f"Summary: {normalized_query} — Fallback results.\n\n{preview}"},
+                    ]
+                    custom_categories = [
+                        {"web_search": "Auto-stored web search results"},
+                        {"technology": "Technology-related search and research"},
+                        {topic_slug: f"Topic: {normalized_query}"},
+                    ]
+                    meta = dict(metadata or {})
+                    meta["detail"] = f"Summary: {normalized_query} — Fallback results."
+                    meta["categories"] = ",".join({"web_search", "technology", topic_slug})
+                    add_employee_memory(
+                        payload,
+                        user_id=mem_user_id,
+                        metadata=meta,
+                        entities=[employee_name] if employee_name else None,
+                        custom_categories=custom_categories,
+                        output_format="v1.1",
+                    )
+            except Exception:
+                logger.debug("Skipping Mem0 auto-store for HTML fallback", exc_info=True)
             return _format_text_results(html_results)
         errors.append("HTML fallback produced no results.")
     except Exception as err:

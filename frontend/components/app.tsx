@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Room, RoomEvent } from 'livekit-client';
 import { motion } from 'motion/react';
-import { RoomAudioRenderer, RoomContext, StartAudio } from '@livekit/components-react';
+import { RoomAudioRenderer, RoomContext, StartAudio, useChat } from '@livekit/components-react';
 import VideoCapture from '@/components/VideoCapture';
 import { toastAlert } from '@/components/alert-toast';
 import AnimatedBackground from '@/components/animated-background';
+import { RobotExpressionProvider } from '@/components/robot/RobotExpressionContext';
 import { SessionView } from '@/components/session-view';
 import { Toaster } from '@/components/ui/sonner';
 import { Welcome } from '@/components/welcome';
-import useChatAndTranscription from '@/hooks/useChatAndTranscription';
 import type { AppConfig } from '@/lib/types';
 import { BACKEND_BASE_URL } from '@/lib/utils';
 
@@ -22,29 +22,45 @@ interface AppProps {
 }
 
 function FaceCaptureDock() {
-  const { send } = useChatAndTranscription();
+  const chat = useChat();
 
   const handleVerified = useCallback(
     (employeeName?: string, employeeId?: string, agentMessage?: string) => {
-      const trimmedMessage = agentMessage?.trim();
       const displayName =
         employeeName && employeeName.trim().length > 0 ? employeeName.trim() : 'there';
-      const safeMessage =
-        trimmedMessage && trimmedMessage.length > 0
-          ? trimmedMessage
-          : `Hello ${displayName}${employeeId ? ` (${employeeId})` : ''}, you are verified and have full access. How can I help you today?`;
+      const trimmedAgentMessage = agentMessage?.trim();
 
-      send(safeMessage).catch((err) => {
+      const directiveParts: string[] = [
+        '[[sys:face_verified]] Face recognition completed.',
+        `Employee: ${displayName}${employeeId ? ` (${employeeId})` : ''}.`,
+      ];
+
+      if (trimmedAgentMessage && trimmedAgentMessage.length > 0) {
+        directiveParts.push(`Suggested greeting: ${trimmedAgentMessage}`);
+      } else {
+        directiveParts.push(
+          'Please greet the employee, confirm their full access, and offer further assistance.'
+        );
+      }
+
+      const directive = directiveParts.join(' ');
+
+      chat.send(directive).catch((err) => {
         console.error('[FaceCaptureDock] Failed to send verification message to agent:', err);
       });
     },
-    [send]
+    [chat]
   );
 
   return (
-    <div className="absolute right-4 bottom-4 mb-34 rounded-lg bg-blue-950 shadow-lg">
+    <motion.div
+      drag
+      dragMomentum={false}
+      dragElastic={0.12}
+      className="pointer-events-auto fixed right-4 bottom-4 left-4 z-50 mx-auto w-auto max-w-md rounded-[30px] bg-blue-950 shadow-lg sm:right-6 sm:left-auto sm:max-w-[320px] md:top-auto md:right-8 md:bottom-20 md:left-auto md:translate-y-0 xl:top-1/2 xl:right-10 xl:bottom-auto xl:left-auto xl:-translate-y-1/2"
+    >
       <VideoCapture onVerified={handleVerified} />
-    </div>
+    </motion.div>
   );
 }
 
@@ -212,25 +228,27 @@ export function App({ appConfig }: AppProps) {
         />
 
         <RoomContext.Provider value={room}>
-          <RoomAudioRenderer />
-          <StartAudio label="Start Audio" />
+          <RobotExpressionProvider>
+            <RoomAudioRenderer />
+            <StartAudio label="Start Audio" />
 
-          <MotionSessionView
-            key="session-view"
-            appConfig={appConfig}
-            disabled={!sessionStarted}
-            sessionStarted={sessionStarted}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: sessionStarted ? 1 : 0 }}
-            transition={{
-              duration: 0.5,
-              ease: 'linear',
-              delay: sessionStarted ? 0.5 : 0,
-            }}
-          />
+            <MotionSessionView
+              key="session-view"
+              appConfig={appConfig}
+              disabled={!sessionStarted}
+              sessionStarted={sessionStarted}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: sessionStarted ? 1 : 0 }}
+              transition={{
+                duration: 0.5,
+                ease: 'linear',
+                delay: sessionStarted ? 0.5 : 0,
+              }}
+            />
 
-          {/* 👇 Face Recognition UI with automatic agent greeting */}
-          {sessionStarted && <FaceCaptureDock />}
+            {/* 👇 Face Recognition UI with automatic agent greeting */}
+            {sessionStarted && <FaceCaptureDock />}
+          </RobotExpressionProvider>
         </RoomContext.Provider>
 
         <Toaster />

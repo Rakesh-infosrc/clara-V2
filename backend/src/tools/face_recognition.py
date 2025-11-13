@@ -5,7 +5,6 @@ from typing import Any
 
 import boto3
 import face_recognition
-import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from datetime import datetime
 from livekit.agents import function_tool, RunContext
@@ -14,6 +13,7 @@ from .config import (
     FACE_S3_BUCKET,
     FACE_IMAGE_BUCKET,
     FACE_ENCODING_S3_KEY,
+    FACE_MATCH_TOLERANCE,
     otp_sessions,
 )
 from .employee_repository import get_employee_by_id
@@ -35,6 +35,72 @@ def _get_s3_client():
 
 def _encoding_bucket() -> str | None:
     return FACE_S3_BUCKET or FACE_IMAGE_BUCKET
+
+
+def _normalize_encoding_payload(data: Any) -> dict[str, Any] | None:
+    if not isinstance(data, dict):
+        print(f"[FaceRecognition] Unexpected encoding payload type: {type(data)}")
+        return None
+
+    encodings = data.get("encodings")
+    employee_ids = (
+        data.get("employee_ids")
+        or data.get("employeeIds")
+        or data.get("ids")
+        or data.get("names")
+    )
+
+    if isinstance(encodings, list) and encodings:
+        if not isinstance(employee_ids, list) or not employee_ids:
+            # Attempt to rebuild IDs from legacy payloads where they are keys
+            employee_ids = data.get("ids") or data.get("names")
+        if isinstance(employee_ids, list) and len(employee_ids) == len(encodings):
+            return {"encodings": encodings, "employee_ids": employee_ids}
+
+    # Legacy format: top-level keys are employee identifiers with encoding payloads as values
+    candidate_encodings: list[Any] = []
+    candidate_ids: list[str] = []
+
+    for key, value in data.items():
+        if key in {"encodings", "employee_ids", "employeeIds", "ids", "names"}:
+            continue
+
+        encoding_value: Any | None = None
+        employee_id = None
+
+        if isinstance(value, dict):
+            encoding_value = (
+                value.get("encoding")
+                or value.get("face_encoding")
+                or value.get("vector")
+                or value.get("embedding")
+                or value.get("face")
+            )
+            employee_id = (
+                value.get("employee_id")
+                or value.get("employeeId")
+                or value.get("id")
+                or value.get("name")
+                or key
+            )
+        elif value is not None:
+            encoding_value = value
+            employee_id = key
+
+        if encoding_value is None:
+            continue
+
+        candidate_encodings.append(encoding_value)
+        candidate_ids.append(str(employee_id).strip() or str(key))
+
+    if candidate_encodings and len(candidate_encodings) == len(candidate_ids):
+        print(
+            f"[FaceRecognition] Normalized legacy encoding payload with {len(candidate_ids)} entries"
+        )
+        return {"encodings": candidate_encodings, "employee_ids": candidate_ids}
+
+    print("[FaceRecognition] Encoding payload missing expected structure; returning empty set")
+    return {"encodings": [], "employee_ids": []}
 
 
 def _read_encoding_blob_from_s3() -> bytes | None:
@@ -83,8 +149,12 @@ def get_face_encoding_data(force_reload: bool = False) -> dict[str, Any] | None:
         _encoding_cache = None
         return None
 
-    _encoding_cache = data
-    return data
+    normalized = _normalize_encoding_payload(data)
+    if normalized is None:
+        _encoding_cache = None
+    else:
+        _encoding_cache = normalized
+    return _encoding_cache
 
 def invalidate_face_encoding_cache() -> None:
     global _encoding_cache
@@ -293,57 +363,98 @@ def run_face_verify(image_bytes: bytes):
 
         # Compare with known encodings using a strict tolerance to avoid false matches
         print(f"Comparing against {len(known_encodings)} known faces...")
-        tolerance = 0.55
+        configured_tolerance = FACE_MATCH_TOLERANCE or 0.6
+        tolerance = max(0.35, min(configured_tolerance, 0.75))
+        if tolerance != configured_tolerance:
+            print(
+                f"⚠️ FACE_MATCH_TOLERANCE ({configured_tolerance}) adjusted to safe range -> {tolerance}"
+            )
+
         matches = face_recognition.compare_faces(known_encodings, face_encoding, tolerance=tolerance)
         
         # Also get face distances for additional validation
         face_distances = face_recognition.face_distance(known_encodings, face_encoding)
         print(f"Face distances: {face_distances}")
         
+        best_distance = None
+        best_match_index: int | None = None
+        low_confidence_match = False
+        confidence_gap = None
         # Find the best match (lowest distance)
         if len(face_distances) > 0:
-            best_match_index = face_distances.argmin()
-            best_distance = face_distances[best_match_index]
+            best_match_index = int(face_distances.argmin())
+            best_distance = float(face_distances[best_match_index])
             print(f"Best match distance: {best_distance} (threshold: {tolerance})")
 
-            # Security threshold matches the relaxed tolerance for consistent acceptance
-            security_threshold = 0.55
-            min_confidence_gap = 0.05
+            other_distances = [d for i, d in enumerate(face_distances) if i != best_match_index]
+            if other_distances:
+                second_best = min(other_distances)
+                confidence_gap = second_best - best_distance
+                print(f"Confidence gap: {confidence_gap}")
 
-            if best_distance <= security_threshold and matches[best_match_index]:
-                other_distances = [d for i, d in enumerate(face_distances) if i != best_match_index]
-                confidence_gap = None
-                if other_distances:
-                    second_best = min(other_distances)
-                    confidence_gap = second_best - best_distance
-                    print(f"Confidence gap: {confidence_gap}")
-                
+            # Security threshold matches the configured tolerance
+            security_threshold = tolerance
+            borderline_threshold = min(tolerance + 0.08, 0.8)
+
+            matched = best_distance <= security_threshold and matches[best_match_index]
+
+            if not matched and best_distance <= borderline_threshold:
+                gap_ok = confidence_gap is None or confidence_gap >= 0.05
+                if gap_ok:
+                    matched = True
+                    low_confidence_match = True
+                    print(
+                        "⚠️ Borderline match accepted",
+                        {
+                            "best_distance": best_distance,
+                            "security_threshold": security_threshold,
+                            "borderline_threshold": borderline_threshold,
+                            "confidence_gap": confidence_gap,
+                        },
+                    )
+
+            if matched and best_match_index is not None:
                 # Face matched! Get employee details
                 employee_id = known_ids[best_match_index]
                 print(f"✅ Face matched! Employee ID: {employee_id}")
-                
+
                 # Look up employee name from DynamoDB
                 employee_name = _get_employee_name(employee_id)
                 print(f"🔍 Employee name lookup result: {employee_name}")
-                
+
+                response: dict[str, Any] = {
+                    "status": "success",
+                    "employeeId": employee_id,
+                }
+
                 if employee_name:
                     print(f"✅ Complete match: {employee_id} -> {employee_name}")
-                    return {
-                        "status": "success",
-                        "employeeId": employee_id,
-                        "name": employee_name,
-                        "message": f"Welcome back, {employee_name}!"
-                    }
+                    response.update(
+                        {
+                            "name": employee_name,
+                            "message": f"Welcome back, {employee_name}!",
+                        }
+                    )
                 else:
                     print(f"⚠️ Face recognized but no name found for ID: {employee_id}")
-                    return {
-                        "status": "success",
-                        "employeeId": employee_id,
-                        "name": f"Employee {employee_id}",
-                        "message": f"Face recognized (ID: {employee_id}), but employee details not found. Please contact HR."
-                    }
+                    response.update(
+                        {
+                            "name": f"Employee {employee_id}",
+                            "message": f"Face recognized (ID: {employee_id}), but employee details not found. Please contact HR.",
+                        }
+                    )
+
+                if low_confidence_match:
+                    response["confidence"] = "low"
+
+                return response
         
-        print(f"❌ No face match found (best distance: {best_distance:.3f} > threshold: {security_threshold})")
+        if best_distance is not None:
+            print(
+                f"❌ No face match found (best distance: {best_distance:.3f} > threshold: {tolerance})"
+            )
+        else:
+            print("❌ No face match found; unable to compute distance against known encodings")
         return {
             "status": "not_recognized", 
             "message": "Face not recognized. Please provide your name and employee ID for manual verification.",
@@ -379,7 +490,6 @@ async def face_login(ctx: RunContext, image_bytes: bytes) -> str:
     if result.get("status") != "success":
         return f"❌ Face not recognized: {result.get('message')}"
 
-    emp_id = result["employeeId"]
     emp_name = result["name"]
 
     return f"✅ Face recognized. Welcome {emp_name}!"

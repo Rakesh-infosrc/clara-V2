@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRobotExpression } from '@/components/robot/RobotExpressionContext';
+import type { Expression } from '@/components/robot/robo-face/expressions';
 import { BACKEND_BASE_URL } from '@/lib/utils';
 
 type FaceFlowState =
@@ -26,6 +28,21 @@ interface FaceFlowResponse {
   flow_status?: {
     current_state?: FaceFlowState;
   } | null;
+}
+
+interface SignalPayload {
+  expression?: string;
+  expr?: string;
+  durationMs?: number | string;
+  duration?: number | string;
+  timeoutMs?: number | string;
+  timeout?: number | string;
+  message?: string;
+}
+
+interface AgentSignal {
+  name?: string;
+  payload?: SignalPayload | null;
 }
 
 interface VerificationState {
@@ -69,6 +86,17 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
   const [scanningEnabled, setScanningEnabled] = useState(false);
   const [mode, setMode] = useState<'idle' | 'employee' | 'visitor'>('idle');
   const backendBase = typeof window !== 'undefined' ? BACKEND_BASE_URL : '';
+  const { triggerExpression } = useRobotExpression();
+  const safeTriggerExpression = useCallback(
+    (expression: Expression, duration: number) => {
+      try {
+        triggerExpression(expression, duration);
+      } catch (error) {
+        console.warn('[VideoCapture] triggerExpression error:', error);
+      }
+    },
+    [triggerExpression]
+  );
 
   // Manual verification state
   const [showManualInput, setShowManualInput] = useState(false);
@@ -77,114 +105,9 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
   const [manualOtp, setManualOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
 
-  // Visitor info
-  const [visitorName, setVisitorName] = useState<string>('');
-  const [showVisitorInfoForm, setShowVisitorInfoForm] = useState(false);
-  const [vName, setVName] = useState('');
-  const [vPhone, setVPhone] = useState('');
-  const [vPurpose, setVPurpose] = useState('');
-  const [vHost, setVHost] = useState('');
-
   const faceScanAttemptsRef = useRef(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const maxFaceScanAttempts = 3;
-
-  const captureVisitorPhoto = useCallback(
-    async (autoCapture: boolean = false, overrideMessage?: string) => {
-      if (!autoCapture && mode !== 'visitor') {
-        return;
-      }
-
-      const video = videoRef.current;
-      if (!video) {
-        return;
-      }
-
-      const stream = video.srcObject as MediaStream | null;
-      const track = stream?.getVideoTracks?.()[0];
-      const isLive = !!track && track.readyState === 'live' && video.videoWidth > 0;
-      if (!isLive) {
-        console.warn('[VideoCapture] Camera feed not live for visitor capture.');
-        setVerification({
-          status: 'failed',
-          message: 'Camera feed not available. Please turn your camera on.',
-          accessGranted: false,
-        });
-        if (track && track.readyState !== 'live') {
-          track.stop();
-        }
-        return;
-      }
-
-      const statusMessage = overrideMessage?.trim()?.length
-        ? overrideMessage
-        : autoCapture
-          ? 'Capturing visitor photo...'
-          : 'Capturing photo...';
-
-      setVerification((prev) => ({
-        ...prev,
-        status: 'scanning',
-        message: statusMessage,
-      }));
-
-      try {
-        const canvas = drawFrameToCanvas(video);
-        const blob = await canvasToBlob(canvas, 'image/jpeg');
-
-        const formData = new FormData();
-        formData.append('image', blob, 'visitor.jpg');
-        const submittedName = (visitorName || vName).trim();
-        if (submittedName) {
-          formData.append('visitor_name', submittedName);
-        }
-
-        const response = await fetch(`${backendBase}/flow/visitor_photo`, {
-          method: 'POST',
-          body: formData,
-        });
-
-        let data: FaceFlowResponse | null = null;
-        try {
-          data = (await response.json()) as FaceFlowResponse;
-        } catch {
-          // ignore JSON parse errors
-        }
-
-        if (!response.ok) {
-          const errorMessage = data?.message ?? response.statusText;
-          console.error(
-            '[VideoCapture] Visitor photo capture failed:',
-            response.status,
-            errorMessage
-          );
-          throw new Error(errorMessage);
-        }
-
-        if (data?.success) {
-          setVerification({
-            status: 'verified',
-            message: data.message || '✅ Visitor photo captured',
-            accessGranted: false,
-          });
-        } else {
-          setVerification({
-            status: 'failed',
-            message: data?.message || 'Visitor photo failed',
-            accessGranted: false,
-          });
-        }
-      } catch (error) {
-        console.error('[VideoCapture] captureVisitorPhoto unexpected error:', error);
-        setVerification({
-          status: 'failed',
-          message: 'Capture failed',
-          accessGranted: false,
-        });
-      }
-    },
-    [backendBase, mode, vName, visitorName]
-  );
 
   const scanFace = useCallback(
     async (force: boolean = false) => {
@@ -198,9 +121,6 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
       );
 
       if (mode === 'visitor') {
-        if (force) {
-          await captureVisitorPhoto(true);
-        }
         return;
       }
 
@@ -288,6 +208,8 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
               employeeId: empId,
             });
             setScanningEnabled(false);
+            // Face verification done -> success expression
+            safeTriggerExpression('success', 4000);
 
             if (onVerified) {
               onVerified(empName || empNameRaw, empId, agentGreeting || successMessage);
@@ -309,6 +231,8 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
               message: 'Face not recognized.',
               accessGranted: false,
             });
+            // Face verification fail -> error expression
+            safeTriggerExpression('error', 3000);
             if (shouldRetry) {
               setTimeout(() => {
                 void scanFace(true);
@@ -325,6 +249,7 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
             message,
             accessGranted: false,
           });
+          safeTriggerExpression('error', 3000);
         }
       } catch (error) {
         console.error('[VideoCapture] scanFace unexpected error:', error);
@@ -333,17 +258,11 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
           message: 'Scan failed',
           accessGranted: false,
         });
+        safeTriggerExpression('error', 3000);
       }
     },
-    [backendBase, captureVisitorPhoto, mode, onVerified, scanningEnabled, verification.status]
+    [backendBase, mode, onVerified, safeTriggerExpression, scanningEnabled, verification.status]
   );
-
-  const captureVisitorNow = useCallback(async () => {
-    if (mode !== 'visitor') {
-      return;
-    }
-    await captureVisitorPhoto();
-  }, [captureVisitorPhoto, mode]);
 
   const setEmployeeMode = useCallback(() => {
     console.log('[VideoCapture] Switching to employee mode');
@@ -360,15 +279,14 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
     }, 500);
   }, [scanFace]);
 
-  const setVisitorMode = useCallback(() => {
+  const setVisitorMode = useCallback((instruction?: string) => {
     console.log('[VideoCapture] Switching to visitor mode');
     faceScanAttemptsRef.current = 0;
     setMode('visitor');
     setScanningEnabled(false);
-    setShowVisitorInfoForm(true);
     setVerification({
       status: 'idle',
-      message: 'Please fill visitor details to proceed',
+      message: instruction || 'Visitor mode active. Please wait for assistance.',
       accessGranted: false,
     });
   }, []);
@@ -412,8 +330,9 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
           message: 'Camera access denied',
           accessGranted: false,
         });
+        safeTriggerExpression('error', 3000);
       });
-  }, []);
+  }, [safeTriggerExpression]);
 
   useEffect(() => {
     const checkSignal = async () => {
@@ -421,33 +340,85 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
         console.log('[VideoCapture] Polling signal endpoint...');
         const response = await fetch(`${backendBase}/get_signal`);
         if (response.ok) {
-          const signal = await response.json();
+          const signal = (await response.json()) as AgentSignal;
           console.log('[VideoCapture] Received signal:', signal);
+          const payload: SignalPayload = signal.payload ?? {};
+          const toExpr = (value: unknown): Expression | null => {
+            if (!value || typeof value !== 'string') return null;
+            const v = value.toLowerCase();
+            const map: Record<string, Expression> = {
+              neutral: 'neutral',
+              happy: 'happy',
+              angry: 'angry',
+              sleep: 'sleep',
+              thinking: 'thinking',
+              listening: 'listening',
+              surprised: 'surprised',
+              sad: 'sad',
+              excited: 'excited',
+              confused: 'confused',
+              loving: 'loving',
+              processing: 'processing',
+              error: 'error',
+              success: 'success',
+            };
+            return map[v] ?? null;
+          };
+          const getDuration = (p: SignalPayload): number | undefined => {
+            const d = p?.durationMs ?? p?.duration ?? p?.timeoutMs ?? p?.timeout;
+            const n = typeof d === 'number' ? d : typeof d === 'string' ? parseInt(d, 10) : NaN;
+            return Number.isNaN(n) ? undefined : n;
+          };
           if (signal?.name === 'start_face_capture') {
             console.log('[VideoCapture] Activating employee face capture mode');
             setEmployeeMode();
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+          } else if (
+            signal?.name === 'face_verification_done' ||
+            signal?.name === 'face_verified' ||
+            signal?.name === 'verification_success'
+          ) {
+            safeTriggerExpression('success', 4000);
+            await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+          } else if (
+            signal?.name === 'face_verification_fail' ||
+            signal?.name === 'face_verification_failed'
+          ) {
+            safeTriggerExpression('error', 4000);
+            await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+          } else if (signal?.name === 'error') {
+            safeTriggerExpression('error', 3000);
+            await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+          } else if (
+            signal?.name === 'set_expression' ||
+            signal?.name === 'set_expr' ||
+            signal?.name === 'expression' ||
+            signal?.name === 'expr' ||
+            // allow direct expression names as the signal name
+            toExpr(signal?.name) !== null
+          ) {
+            const expr = toExpr(payload.expression ?? payload.expr ?? signal?.name);
+            const dur = getDuration(payload) ?? 3000;
+            if (expr) {
+              safeTriggerExpression(expr, dur);
+              await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
+            }
           } else if (signal?.name === 'stop_face_capture') {
             console.log('[VideoCapture] Received stop_face_capture signal');
             setIdleMode();
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
           } else if (signal?.name === 'start_visitor_info') {
             console.log('[VideoCapture] Switching to visitor info collection mode');
-            setVisitorMode();
+            setVisitorMode(
+              signal.payload?.message || 'Visitor mode active. Please wait for assistance.'
+            );
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
           } else if (signal?.name === 'start_visitor_photo') {
             console.log('[VideoCapture] Activating visitor photo capture mode');
-            setMode('visitor');
-            setScanningEnabled(false);
-            setVerification({
-              status: 'idle',
-              message: signal.payload?.message || 'Capturing visitor photo...',
-              accessGranted: false,
-            });
+            setVisitorMode(
+              signal.payload?.message || 'Visitor mode active. Please wait for assistance.'
+            );
             await fetch(`${backendBase}/clear_signal`, { method: 'POST' });
-            setTimeout(() => {
-              void captureVisitorPhoto(true, signal.payload?.message);
-            }, 500);
           }
         }
 
@@ -493,8 +464,8 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
     };
   }, [
     backendBase,
-    captureVisitorPhoto,
     mode,
+    safeTriggerExpression,
     scanFace,
     scanningEnabled,
     setEmployeeMode,
@@ -571,156 +542,52 @@ export default function VideoCapture({ onVerified }: VideoCaptureProps) {
   };
 
   return (
-    <div className="min-w-[300px] rounded-lg bg-gray-900 p-4 text-white shadow-lg">
-      <div className="mb-3">
-        <h3 className="mb-2 text-lg font-semibold">Face Recognition</h3>
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className="h-48 w-full rounded-lg border-2 border-gray-700 object-cover"
-        />
+    <div className="face-card w-[220px] rounded-3xl border border-white/10 bg-blue-800 bg-gradient-to-br from-slate-950/90 via-slate-900/70 to-slate-900/40 p-4 text-white shadow-[0_18px_36px_-18px_rgba(15,23,42,0.75)] backdrop-blur-2xl sm:w-[260px] md:w-[280px]">
+      <div className="mb-3 flex flex-col items-center text-center">
+        <h3 className="mb-2 text-base font-semibold tracking-wide text-white/90">
+          Face Recognition
+        </h3>
+        <div className="relative w-full overflow-hidden rounded-[18px] border border-white/15 bg-white/5 shadow-[0_14px_30px_-16px_rgba(37,99,235,0.5)]">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/15 via-transparent to-sky-400/15 opacity-55" />
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="face-card__video relative z-[1] h-40 w-full object-cover md:h-48"
+          />
+        </div>
       </div>
 
       {/* Manual mode controls */}
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex justify-center">
         <button
           onClick={setEmployeeMode}
-          className={`rounded px-3 py-2 ${mode === 'employee' ? 'bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+          className={`relative overflow-hidden rounded-xl border border-white/20 px-3 py-2 text-xs font-medium tracking-wide text-white uppercase shadow-lg backdrop-blur-md transition-all duration-300 ease-out ${
+            mode === 'employee'
+              ? 'border-blue-400/30 bg-gradient-to-r from-blue-500/80 to-blue-600/80 shadow-blue-500/25'
+              : 'bg-gradient-to-r from-blue-500/60 to-blue-600/60 hover:border-blue-400/30 hover:from-blue-500/80 hover:to-blue-600/80 hover:shadow-blue-500/25'
+          } before:absolute before:inset-0 before:bg-gradient-to-r before:from-white/10 before:to-transparent before:opacity-0 before:transition-opacity before:duration-300 hover:before:opacity-100`}
         >
-          Employee Mode
-        </button>
-        <button
-          onClick={setVisitorMode}
-          className={`rounded px-3 py-2 ${mode === 'visitor' ? 'bg-indigo-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-        >
-          Visitor Mode
-        </button>
-        <button
-          onClick={setIdleMode}
-          className={`rounded px-3 py-2 ${mode === 'idle' ? 'bg-gray-700' : 'bg-gray-600 hover:bg-gray-700'}`}
-        >
-          Idle
+          <span className="relative z-10">Employee Mode</span>
         </button>
       </div>
 
       {/* Status Display */}
-      <div className={`mb-3 flex items-center ${getStatusColor()}`}>
-        <span className="mr-2 text-xl">{getStatusIcon()}</span>
-        <span className="text-sm">{verification.message}</span>
+      <div
+        className={`mb-2.5 flex items-center gap-1.5 rounded-2xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] ${getStatusColor()}`}
+      >
+        <span className="text-base">{getStatusIcon()}</span>
+        <span className="leading-tight text-white/80">{verification.message}</span>
       </div>
-
-      {/* Visitor info and manual capture */}
-      {mode === 'visitor' && (
-        <div className="mb-3 space-y-2">
-          {showVisitorInfoForm ? (
-            <div className="space-y-2">
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                <input
-                  type="text"
-                  placeholder="Full Name"
-                  value={vName}
-                  onChange={(e) => setVName(e.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 p-2 text-white"
-                />
-                <input
-                  type="tel"
-                  placeholder="Phone"
-                  value={vPhone}
-                  onChange={(e) => setVPhone(e.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 p-2 text-white"
-                />
-                <input
-                  type="text"
-                  placeholder="Purpose (e.g., Interview/Meeting)"
-                  value={vPurpose}
-                  onChange={(e) => setVPurpose(e.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 p-2 text-white md:col-span-2"
-                />
-                <input
-                  type="text"
-                  placeholder="Meeting Employee"
-                  value={vHost}
-                  onChange={(e) => setVHost(e.target.value)}
-                  className="w-full rounded border border-gray-600 bg-gray-700 p-2 text-white md:col-span-2"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={async () => {
-                    if (!vName || !vPhone || !vPurpose || !vHost) {
-                      alert('Please fill all fields');
-                      return;
-                    }
-                    try {
-                      const res = await fetch(`${backendBase}/flow/visitor_info`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          name: vName,
-                          phone: vPhone,
-                          purpose: vPurpose,
-                          host_employee: vHost,
-                        }),
-                      });
-                      const data = await res.json();
-                      if (!res.ok || data?.success === false) {
-                        throw new Error(data?.message || res.statusText);
-                      }
-                      setVisitorName(vName);
-                      setShowVisitorInfoForm(false);
-                      setVerification({
-                        status: 'idle',
-                        message: 'Info submitted. Preparing photo capture...',
-                        accessGranted: false,
-                      });
-                      setTimeout(() => {
-                        captureVisitorPhoto(true, data?.next_prompt || data?.message);
-                      }, 800);
-                      // The backend will signal start_visitor_photo next; our polling will enable scanning
-                    } catch (error: unknown) {
-                      const message = error instanceof Error ? error.message : String(error);
-                      console.error('[VideoCapture] Visitor info submission failed:', error);
-                      alert(`Failed to submit info: ${message}`);
-                    }
-                  }}
-                  className="rounded bg-emerald-600 px-4 py-2 hover:bg-emerald-700"
-                >
-                  Submit Info
-                </button>
-              </div>
-            </div>
-          ) : (
-            <>
-              <input
-                type="text"
-                placeholder="Visitor name (optional)"
-                value={visitorName}
-                onChange={(e) => setVisitorName(e.target.value)}
-                className="w-full rounded border border-gray-600 bg-gray-700 p-2 text-white"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={captureVisitorNow}
-                  className="rounded bg-indigo-600 px-4 py-2 hover:bg-indigo-700"
-                  disabled={verification.status === 'scanning'}
-                >
-                  {verification.status === 'scanning' ? 'Capturing...' : 'Capture Now'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      )}
 
       {/* Access Status */}
       <div className="space-y-2">
         {verification.accessGranted && (
-          <div className="rounded-lg bg-green-800 p-3">
-            <p className="text-sm text-green-200">🔓 Full Access Granted</p>
+          <div className="rounded-2xl border border-green-400/60 bg-green-500/25 p-2.5 text-[11px] shadow-[0_14px_24px_-18px_rgba(34,197,94,0.4)]">
+            <p className="text-green-300/90">🔓 Full Access Granted</p>
             {verification.employeeName && (
-              <p className="font-semibold text-green-100">
+              <p className="text-xs font-semibold text-green-100">
                 {verification.employeeName}
                 {verification.employeeId ? ` (${verification.employeeId})` : ''}
               </p>

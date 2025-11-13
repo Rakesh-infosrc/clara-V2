@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from typing import Any, Optional
 
@@ -53,9 +52,14 @@ def _normalize_phone_number(phone: str | None) -> str:
     default_code = get_default_sms_country_code() or ""
     default_code = default_code.strip()
     if default_code:
-        if default_code.startswith("+"):
-            return f"{default_code}{digits}"
-        return f"+{default_code}{digits}"
+        normalized_code = default_code[1:] if default_code.startswith("+") else default_code
+        if digits.startswith(normalized_code):
+            return f"+{digits}"
+        return f"+{normalized_code}{digits}"
+
+    # Fallback: assume Indian numbering if we only received the 10-digit local number.
+    if len(digits) == 10:
+        return f"+91{digits}"
 
     return f"+{digits}"
 

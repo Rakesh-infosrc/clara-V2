@@ -249,7 +249,7 @@ Resources:
         - Field: path-pattern
           Values: 
             - "/flow/*"
-            - "/otp/*"
+            - "/otp/*" 
             - "/employee_verify"
             - "/notify_agent_verification"
             - "/post_signal"

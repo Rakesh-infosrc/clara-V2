@@ -73,7 +73,7 @@ Run the provided PowerShell script:
    ```
 
 ## Expected Behavior
-1. Open http://localhost:3000
+1. Open http://localhost:3003
 2. Click "START CALL" button
 3. You should see the Clara agent join the room
 4. Say "Hey Clara" to activate the agent

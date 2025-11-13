@@ -1,8 +1,6 @@
-// frontend\app\api\connection-details\faceApi.ts
-import { BACKEND_BASE_URL } from '@/lib/utils';
-
+// frontend/app/api/connection-details/faceApi.ts
 export async function verifyFace(imageBlob: Blob) {
-  const backendBase = BACKEND_BASE_URL;
+  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://127.0.0.1:8000';
   const formData = new FormData();
   formData.append('image', imageBlob, 'capture.jpg');
 

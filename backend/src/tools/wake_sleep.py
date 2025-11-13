@@ -13,10 +13,8 @@ from agent_state import (
     go_to_sleep,
     update_activity,
     check_auto_sleep,
-    set_preferred_language,
 )
 from speech import get_asr_instance
-from language_utils import resolve_language_code
 
 try:  # Optional dependency for language identification
     from fasttext import load_model  # type: ignore

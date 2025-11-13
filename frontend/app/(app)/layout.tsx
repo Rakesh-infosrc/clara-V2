@@ -1,13 +1,13 @@
-import { headers } from 'next/headers';
 import { getAppConfig } from '@/lib/utils';
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
+export const dynamic = 'force-static';
+
 export default async function AppLayout({ children }: AppLayoutProps) {
-  const hdrs = await headers();
-  const { companyName, logo, logoDark } = await getAppConfig(hdrs);
+  const { companyName, logo, logoDark } = await getAppConfig();
 
   return (
     <>

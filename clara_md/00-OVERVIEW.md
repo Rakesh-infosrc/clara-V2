@@ -59,6 +59,8 @@ Clara follows a **microservices architecture** deployed on AWS:
 └─────────────┘    └─────────────┘   └─────────────┘
 ```
 
+![Clara Flow Diagram](./Clara_flow_diagram_transparent.png)
+
 ### Components
 
 1. **Frontend**: Next.js 15 with React 19, TailwindCSS, LiveKit Components
@@ -91,10 +93,10 @@ Clara follows a **microservices architecture** deployed on AWS:
 
 ### 🌍 Multi-language Support
 
-- Automatic language detection using fasttext model
-- Dynamic message translation for all UI elements
-- Language-specific prompts and responses
-- Seamless language switching during conversations
+- Default conversation language is English until the user explicitly requests a switch
+- Explicit language switching supported via one-word or native-script names (English/தமிழ்/తెలుగు/हिंदी)
+- Dynamic message translation and language-specific prompts
+- Seamless continuation in the selected language for the rest of the flow
 
 ---
 
@@ -184,7 +186,7 @@ pnpm install
 pnpm dev
 
 # 5. Access the application
-# Frontend: http://localhost:3000
+# Frontend: http://localhost:3003
 # Backend: http://localhost:8000
 ```
 
@@ -216,7 +218,7 @@ aws cloudformation deploy \
 
 ## Contributors
 
-- **Project Lead**: Rakesh
+- **Project Lead**: Bijjam Rakesh Reddy
 - **Organization**: Info Services
 - **Version**: 2.0 (Multi-language Support)
 

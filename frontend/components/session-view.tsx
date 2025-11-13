@@ -122,14 +122,14 @@ export const SessionView = ({
         </div>
       </ChatMessageView>
 
-      <div className="bg-background mp-12 fixed top-0 right-0 left-0 h-32 md:h-36">
+      <div className="bg-background fixed top-0 right-0 left-0 h-8 md:h-14">
         {/* skrim */}
-        <div className="from-background absolute bottom-0 left-0 h-12 w-full translate-y-full bg-gradient-to-b to-transparent" />
+        <div className="from-background absolute bottom-0 left-0 h-10 w-full translate-y-full bg-gradient-to-b to-transparent" />
       </div>
 
       <MediaTiles chatOpen={chatOpen} />
 
-      <div className="bg-background fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
+      <div className="fixed right-0 bottom-0 left-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
         <motion.div
           key="control-bar"
           initial={{ opacity: 0, translateY: '100%' }}
@@ -170,7 +170,7 @@ export const SessionView = ({
             />
           </div>
           {/* skrim */}
-          <div className="from-background border-background absolute top-0 left-0 h-12 w-full -translate-y-full bg-gradient-to-t to-transparent" />
+          <div className="border-background absolute top-0 left-0 h-full w-full -translate-y-full bg-gradient-to-t to-transparent" />
         </motion.div>
       </div>
     </section>

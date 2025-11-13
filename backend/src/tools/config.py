@@ -26,11 +26,14 @@ VISA_PDF_TEMPLATE = os.getenv("VISA_PDF_TEMPLATE")
 
 # ---------------- AWS Configuration ----------------
 # AWS Chennai account (SNS-only). DynamoDB/S3 stay on the primary account.
-SNS_ACCESS_KEY_ID = os.getenv("CHE_AWS_ACCESS_KEY_ID", os.getenv("AWS_ACCESS_KEY_ID"))
-SNS_SECRET_ACCESS_KEY = os.getenv("CHE_AWS_SECRET_ACCESS_KEY", os.getenv("AWS_SECRET_ACCESS_KEY"))
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 AWS_REGION_ENV = os.getenv("AWS_REGION")
-AWS_REGION = os.getenv("CHE_AWS_REGION", AWS_REGION_ENV or "us-east-1")
+
+# Prefer dedicated Chennai SNS credentials when provided; otherwise reuse the primary AWS keys.
+SNS_ACCESS_KEY_ID = os.getenv("CHE_AWS_ACCESS_KEY_ID") or AWS_ACCESS_KEY_ID
+SNS_SECRET_ACCESS_KEY = os.getenv("CHE_AWS_SECRET_ACCESS_KEY") or AWS_SECRET_ACCESS_KEY
+AWS_REGION = os.getenv("CHE_AWS_REGION") or AWS_REGION_ENV or "us-east-1"
 AWS_SNS_SENDER_ID = os.getenv("AWS_SNS_SENDER_ID")
 AWS_SNS_SMS_TYPE = os.getenv("AWS_SNS_SMS_TYPE", "Transactional")
 SMS_DEFAULT_COUNTRY_CODE = os.getenv("CHE_SMS_DEFAULT_COUNTRY_CODE", os.getenv("SMS_DEFAULT_COUNTRY_CODE", ""))
@@ -40,6 +43,7 @@ EMPLOYEE_TABLE_NAME = os.getenv("EMPLOYEE_TABLE_NAME", "zenith-hr-employees")
 EMPLOYEE_EMAIL_INDEX = os.getenv("EMPLOYEE_EMAIL_INDEX", "EmailIndex")
 EMPLOYEE_ID_INDEX = os.getenv("EMPLOYEE_ID_INDEX", "EmployeeIdIndex")
 EMPLOYEE_PRIMARY_KEY = os.getenv("EMPLOYEE_PRIMARY_KEY", "id")
+ID_INDEX_NAME = os.getenv("ID_INDEX_NAME", "id-index")
 VISITOR_LOG_TABLE_NAME = os.getenv("VISITOR_LOG_TABLE_NAME", "Clara_visitor_log")
 MANAGER_VISIT_TABLE_NAME = os.getenv("MANAGER_VISIT_TABLE_NAME", "Clara_manager_visits")
 VISITOR_PHOTO_BUCKET = os.getenv("VISITOR_PHOTO_BUCKET")
@@ -53,6 +57,12 @@ FACE_IMAGE_PREFIX = os.getenv("FACE_IMAGE_PREFIX", "Employee_Images")
 FACE_IMAGE_EXTENSION = os.getenv("FACE_IMAGE_EXTENSION", "jpg")
 FACE_ENCODING_TABLE_NAME = os.getenv("FACE_ENCODING_TABLE_NAME", "clara_face_encodings")
 FACE_ENCODING_TABLE_KEY = os.getenv("FACE_ENCODING_TABLE_KEY", "FACE_ENCODINGS")
+FACE_IMAGE_META_S3_KEY = os.getenv("FACE_IMAGE_META_S3_KEY", "Pickle_file/employee_images.pkl")
+try:
+    FACE_MATCH_TOLERANCE = float(os.getenv("FACE_MATCH_TOLERANCE", "0.6"))
+except ValueError:
+    print("[config] Invalid FACE_MATCH_TOLERANCE provided. Falling back to 0.6")
+    FACE_MATCH_TOLERANCE = 0.6
 FACE_RECOGNITION_ENABLED = os.getenv("FACE_RECOGNITION_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")

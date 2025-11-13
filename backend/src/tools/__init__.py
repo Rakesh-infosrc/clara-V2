@@ -1,6 +1,7 @@
 # Import all tools for easy access
 from .company_info import company_info
 from .employee_verification import get_employee_details
+from .employee_details import employee_details
 from .visitor_management import log_and_notify_visitor, capture_visitor_photo, get_visitor_log, mark_visitor_photo_captured
 try:
     # Optional: relies on speech_recognition; guard to avoid import errors when not installed
@@ -12,11 +13,20 @@ from .web_search import search_web
 from .email_sender import send_email
 from .face_recognition import face_verify, face_login, run_face_verify
 from .face_registration import register_employee_face, check_face_registration_status, remove_face_registration
+from .memory_tools import (
+    memory_add,
+    memory_get_all,
+    memory_update,
+    memory_delete,
+    memory_recall,
+    memory_list_reminders,
+)
 
 # Make all tools available when importing from tools
 __all__ = [
     'company_info',
-    'get_employee_details', 
+    'get_employee_details',
+    'employee_details', 
     'log_and_notify_visitor',
     'capture_visitor_photo',
     'get_visitor_log',
@@ -31,4 +41,5 @@ __all__ = [
     'register_employee_face',
     'check_face_registration_status',
     'remove_face_registration'
+    , 'memory_add', 'memory_get_all', 'memory_update', 'memory_delete', 'memory_recall'
 ]

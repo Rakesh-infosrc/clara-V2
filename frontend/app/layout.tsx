@@ -3,6 +3,7 @@ import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
 import { APP_CONFIG_DEFAULTS } from '@/app-config';
 import { ApplyThemeScript, ThemeToggle } from '@/components/theme-toggle';
+import { getAppConfig } from '@/lib/utils';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -49,7 +50,7 @@ interface RootLayoutProps {
 export const dynamic = 'force-static';
 
 export default async function RootLayout({ children }: RootLayoutProps) {
-  const { accent, accentDark, pageTitle, pageDescription } = APP_CONFIG_DEFAULTS;
+  const { accent, accentDark, pageTitle, pageDescription } = await getAppConfig();
 
   // check provided accent colors against defaults, and apply styles if they differ (or in development mode)
   // generate a hover color for the accent color by mixing it with 20% black

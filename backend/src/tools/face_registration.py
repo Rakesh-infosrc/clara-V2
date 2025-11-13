@@ -5,15 +5,8 @@ This tool allows new employees to register their faces after manual verification
 """
 
 import io
-import os
-from typing import Any
-
-import boto3
 import pandas as pd
-import face_recognition
-import numpy as np
 from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
-from datetime import datetime
 from livekit.agents import function_tool, RunContext
 
 from .config import (
@@ -22,7 +15,6 @@ from .config import (
     FACE_IMAGE_BUCKET,
     FACE_IMAGE_PREFIX,
     FACE_IMAGE_EXTENSION,
-    FACE_ENCODING_S3_KEY,
 )
 from .face_recognition import get_face_encoding_data, save_face_encoding_data
 
@@ -247,8 +239,8 @@ async def remove_face_registration(ctx: RunContext, employee_id: str) -> str:
         
         # Find and remove the employee's face
         index = known_ids.index(employee_id)
-        removed_encoding = known_encodings.pop(index)
-        removed_id = known_ids.pop(index)
+        known_encodings.pop(index)
+        known_ids.pop(index)
         
         # Save updated encodings
         updated_encoding_data = {

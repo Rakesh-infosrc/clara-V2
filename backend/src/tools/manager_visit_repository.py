@@ -2,6 +2,8 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
 
+from .config import AWS_REGION, MANAGER_VISIT_TABLE_NAME
+
 
 def _generate_date_candidates(date_key: str | None) -> list[str]:
     """Return possible DynamoDB date keys (both padded and non-padded)."""
@@ -21,8 +23,6 @@ def _generate_date_candidates(date_key: str | None) -> list[str]:
             candidates.append(variant)
 
     return candidates
-
-from .config import AWS_REGION, MANAGER_VISIT_TABLE_NAME
 
 _dynamodb = None
 _table = None

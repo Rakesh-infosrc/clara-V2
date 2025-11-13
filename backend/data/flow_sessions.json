@@ -1,28 +1,5 @@
 {
-  "sessions": {
-    "session_1762256773778": {
-      "session_id": "session_1762256773778",
-      "current_state": "language_selection",
-      "user_type": "unknown",
-      "start_time": 1762256773.7789764,
-      "last_activity": 1762256773.8135812,
-      "verification_attempts": 0,
-      "user_data": {},
-      "is_verified": false,
-      "verification_method": null
-    },
-    "session_1762256979036": {
-      "session_id": "session_1762256979036",
-      "current_state": "language_selection",
-      "user_type": "unknown",
-      "start_time": 1762256979.0362437,
-      "last_activity": 1762256979.4134734,
-      "verification_attempts": 0,
-      "user_data": {},
-      "is_verified": false,
-      "verification_method": null
-    }
-  },
-  "current_session_id": "session_1762256979036",
-  "last_updated": 1762256979.4134734
+  "sessions": {},
+  "current_session_id": null,
+  "last_updated": 1763035839.9612079
 }

@@ -16,6 +16,7 @@ try:
         FACE_IMAGE_PREFIX,
         FACE_IMAGE_EXTENSION,
         FACE_ENCODING_S3_KEY,
+        FACE_IMAGE_META_S3_KEY,
     )
 except ImportError:
     import importlib.util
@@ -33,6 +34,7 @@ except ImportError:
     FACE_IMAGE_PREFIX = _config.FACE_IMAGE_PREFIX
     FACE_IMAGE_EXTENSION = _config.FACE_IMAGE_EXTENSION
     FACE_ENCODING_S3_KEY = _config.FACE_ENCODING_S3_KEY
+    FACE_IMAGE_META_S3_KEY = getattr(_config, "FACE_IMAGE_META_S3_KEY", "Pickle_file/employee_images.pkl")
 
 
 def _image_bucket() -> str | None:
@@ -99,7 +101,7 @@ def fetch_employee_images() -> dict[str, dict[str, str]]:
 
 def upload_employee_images_pickle(data: dict[str, dict[str, str]]) -> bool:
     bucket = _encoding_bucket()
-    key = FACE_ENCODING_S3_KEY
+    key = FACE_IMAGE_META_S3_KEY or FACE_ENCODING_S3_KEY
 
     if not bucket or not key:
         print("Missing S3 bucket or key configuration for face encodings.")
@@ -110,7 +112,7 @@ def upload_employee_images_pickle(data: dict[str, dict[str, str]]) -> bool:
 
     try:
         s3_client.put_object(Bucket=bucket, Key=key, Body=payload)
-        print(f"Uploaded pickle to s3://{bucket}/{key}")
+        print(f"Uploaded employee image metadata pickle to s3://{bucket}/{key}")
         return True
     except (BotoCoreError, ClientError) as exc:
         print(f"Failed to upload employee image pickle to S3: {exc}")

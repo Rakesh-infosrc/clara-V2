@@ -1,5 +1,5 @@
 import React from 'react';
-import VideoCapture from '@/components/VideoCapture';
+import VisitorPhotoClient from '@/components/visitor/VisitorPhotoClient';
 
 export const metadata = {
   title: 'Visitor Photo Capture',
@@ -8,7 +8,7 @@ export const metadata = {
 export default function VisitorPhotoPage() {
   return (
     <main className="min-h-screen p-6">
-      <VideoCapture />
+      <VisitorPhotoClient />
     </main>
   );
 }

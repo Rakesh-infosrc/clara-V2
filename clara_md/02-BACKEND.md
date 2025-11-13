@@ -481,6 +481,57 @@ async def get_company_information(query: str = "") -> str:
 
 ---
 
+### 7.5 Mem0 Memory Integration (Private Employee Scope)
+
+- Private per-employee storage using a composite `user_id` (e.g., `employeeId:employeeName`).
+- Employee name is added as Mem0 `ENTITIES` for grouping on the Mem0 dashboard.
+- Tools exposed to the agent:
+  - `memory_add(information, categories?, custom_categories?, output_format?)`
+  - `memory_get_all(limit=20)`
+  - `memory_update(memory_id, content)`
+  - `memory_delete(memory_id)`
+  - `memory_recall(query, limit=5)`
+- Web search results are automatically stored for verified employees (no trigger words).
+- All operations are scoped to the current verified employee; cross-employee access is blocked by design.
+
+Example: direct client usage with custom categories and v1.1 output
+
+```python
+from mem0_client import add_employee_memory
+
+messages = [
+    {"role": "user", "content": "Hi, I'm Mark. I mainly code in JavaScript."},
+    {"role": "assistant", "content": "Hello Mark! JavaScript is a versatile language."},
+    {"role": "user", "content": "I play League of Legends competitively."},
+]
+
+custom_categories = [
+    {"gaming": "For users interested in video games, including gaming preferences, favorite titles, and gaming setup."},
+    {"technology": "Includes content related to tech interests, such as programming languages and hardware preferences."},
+]
+
+ok = add_employee_memory(
+    messages,
+    user_id="mark",  # in Clara this is resolved to a private employee-scoped id
+    entities=["Mark"],
+    custom_categories=custom_categories,
+    output_format="v1.1",
+)
+```
+
+Example: via agent tool (JSON string for `custom_categories`)
+
+```python
+# memory_add(information, categories?, custom_categories?, output_format?)
+await memory_add(
+    information="I mainly code in JavaScript and play LoL.",
+    custom_categories='[{"technology": "Programming interests"}, {"gaming": "Favorite titles and setup"}]',
+    output_format="v1.1",
+)
+```
+
+---
+
 ### 8. OTP Management
 
 **OTP Generation and Sending:**

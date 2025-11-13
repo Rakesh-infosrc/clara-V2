@@ -63,6 +63,12 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Robot face theme (light) */
+  --robo-eye: 190 100% 46%;
+  --robo-glow: 190 100% 70%;
+  --robo-bg: 210 60% 6%;
+  --robo-face: 200 75% 35%;
 }
 
 .dark {
@@ -124,6 +130,12 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.439 0 0);
+
+  /* Robot face theme (dark) */
+  --robo-eye: 190 100% 52%;
+  --robo-glow: 190 100% 65%;
+  --robo-bg: 210 60% 5%;
+  --robo-face: 200 70% 30%;
 }
 
 @theme inline {
@@ -186,6 +198,12 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* Robot color tokens */
+  --color-robo-bg: hsl(var(--robo-bg));
+  --color-robo-eye: hsl(var(--robo-eye));
+  --color-robo-glow: hsl(var(--robo-glow));
+  --color-robo-face: hsl(var(--robo-face));
+
   --color-button: var(--bg2);
   --color-button-hover: var(--bg3);
   --color-button-foreground: var(--fg1);
@@ -243,5 +261,21 @@
     100% {
       background-position: 250% 0;
     }
+  }
+}
+
+/* Face recognition card responsive tweaks */
+.face-card {
+  transition: width 0.2s ease, padding 0.2s ease;
+}
+
+@media (min-height: 900px) and (max-width: 1024px) {
+  .face-card {
+    width: 200px !important;
+    padding: 0.9rem !important;
+  }
+
+  .face-card__video {
+    height: 9.5rem !important;
   }
 }

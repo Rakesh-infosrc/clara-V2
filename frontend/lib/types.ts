@@ -34,3 +34,10 @@ export interface SandboxConfig {
     | { type: 'boolean'; value: boolean }
     | null;
 }
+
+export interface ConnectionDetails {
+  serverUrl: string;
+  participantToken: string;
+  roomName?: string;
+  participantIdentity?: string;
+}
